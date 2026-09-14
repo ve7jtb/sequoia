@@ -24,59 +24,59 @@ members = ["."]
 debug = 1
 
 [[bin]]
-name = "cert_from_bytes"
-path = "fuzz_targets/cert_from_bytes.rs"
+name = "cert-from-bytes"
+path = "fuzz_targets/cert-from-bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "inline_verify_from_bytes"
-path = "fuzz_targets/inline_verify_from_bytes.rs"
+name = "inline-verify-from-bytes"
+path = "fuzz_targets/inline-verify-from-bytes.rs"
 
 [[bin]]
-name = "csf_verify_from_bytes"
-path = "fuzz_targets/csf_verify_from_bytes.rs"
+name = "csf-verify-from-bytes"
+path = "fuzz_targets/csf-verify-from-bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "decrypt_from_bytes"
-path = "fuzz_targets/decrypt_from_bytes.rs"
+name = "decrypt-from-bytes"
+path = "fuzz_targets/decrypt-from-bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "key_packet_from_bytes"
-path = "fuzz_targets/key_packet_from_bytes.rs"
+name = "key-packet-from-bytes"
+path = "fuzz_targets/key-packet-from-bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "rawcert_from_bytes"
-path = "fuzz_targets/rawcert_from_bytes.rs"
+name = "rawcert-from-bytes"
+path = "fuzz_targets/rawcert-from-bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "cert_parser_binary_from_bytes"
-path = "fuzz_targets/cert_parser_binary_from_bytes.rs"
+name = "cert-parser-binary-from-bytes"
+path = "fuzz_targets/cert-parser-binary-from-bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "cert_parser_from_bytes"
-path = "fuzz_targets/cert_parser_from_bytes.rs"
+name = "cert-parser-from-bytes"
+path = "fuzz_targets/cert-parser-from-bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "message_from_bytes"
-path = "fuzz_targets/message_from_bytes.rs"
+name = "message-from-bytes"
+path = "fuzz_targets/message-from-bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "packet_pile_from_bytes"
-path = "fuzz_targets/packet_pile_from_bytes.rs"
+name = "packet-pile-from-bytes"
+path = "fuzz_targets/packet-pile-from-bytes.rs"
 test = false
 doc = false

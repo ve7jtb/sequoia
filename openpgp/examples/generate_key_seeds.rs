@@ -26,16 +26,16 @@
 //!
 //! Target coverage:
 //!
-//! - `cert_from_bytes`               cert (public, secret/TSK, armored)
-//! - `key_packet_from_bytes`         primary/subkey packets (public + secret)
-//! - `rawcert_from_bytes`            binary cert, binary keyring
-//! - `cert_parser_from_bytes`        armored cert, binary cert, binary keyring
-//! - `cert_parser_binary_from_bytes` binary cert, binary keyring
-//! - `message_from_bytes`            literal, inline-signed, encrypted messages
-//! - `packet_pile_from_bytes`        secret cert + inline-signed + encrypted
-//! - `inline_verify_from_bytes`      inline-signed message
-//! - `csf_verify_from_bytes`         cleartext-signed message (CSF)
-//! - `decrypt_from_bytes`            encrypted message
+//! - `cert-from-bytes`               cert (public, secret/TSK, armored)
+//! - `key-packet-from-bytes`         primary/subkey packets (public + secret)
+//! - `rawcert-from-bytes`            binary cert, binary keyring
+//! - `cert-parser-from-bytes`        armored cert, binary cert, binary keyring
+//! - `cert-parser-binary-from-bytes` binary cert, binary keyring
+//! - `message-from-bytes`            literal, inline-signed, encrypted messages
+//! - `packet-pile-from-bytes`        secret cert + inline-signed + encrypted
+//! - `inline-verify-from-bytes`      inline-signed message
+//! - `csf-verify-from-bytes`         cleartext-signed message (CSF)
+//! - `decrypt-from-bytes`            encrypted message
 
 use std::fs;
 use std::io::Write;
@@ -197,26 +197,26 @@ fn main() -> Result<()> {
     // --- Distribute seeds to each target's corpus ------------------------
 
     eprintln!("cert seeds:");
-    write_seed(&corpus("cert_from_bytes"), "cert-public.pgp", &cert_public)?;
-    write_seed(&corpus("cert_from_bytes"), "cert-secret.tsk", &cert_secret)?;
-    write_seed(&corpus("cert_from_bytes"), "cert-armored.asc", &cert_armored)?;
+    write_seed(&corpus("cert-from-bytes"), "cert-public.pgp", &cert_public)?;
+    write_seed(&corpus("cert-from-bytes"), "cert-secret.tsk", &cert_secret)?;
+    write_seed(&corpus("cert-from-bytes"), "cert-armored.asc", &cert_armored)?;
 
-    write_seed(&corpus("rawcert_from_bytes"), "cert-public.pgp", &cert_public)?;
-    write_seed(&corpus("rawcert_from_bytes"), "keyring.pgp", &keyring)?;
+    write_seed(&corpus("rawcert-from-bytes"), "cert-public.pgp", &cert_public)?;
+    write_seed(&corpus("rawcert-from-bytes"), "keyring.pgp", &keyring)?;
 
-    write_seed(&corpus("cert_parser_from_bytes"), "cert-armored.asc", &cert_armored)?;
-    write_seed(&corpus("cert_parser_from_bytes"), "cert-public.pgp", &cert_public)?;
-    write_seed(&corpus("cert_parser_from_bytes"), "keyring.pgp", &keyring)?;
+    write_seed(&corpus("cert-parser-from-bytes"), "cert-armored.asc", &cert_armored)?;
+    write_seed(&corpus("cert-parser-from-bytes"), "cert-public.pgp", &cert_public)?;
+    write_seed(&corpus("cert-parser-from-bytes"), "keyring.pgp", &keyring)?;
 
-    write_seed(&corpus("cert_parser_binary_from_bytes"), "cert-public.pgp", &cert_public)?;
-    write_seed(&corpus("cert_parser_binary_from_bytes"), "keyring.pgp", &keyring)?;
+    write_seed(&corpus("cert-parser-binary-from-bytes"), "cert-public.pgp", &cert_public)?;
+    write_seed(&corpus("cert-parser-binary-from-bytes"), "keyring.pgp", &keyring)?;
 
     // Key packets: primary and any subkeys, in both public and secret-bearing
     // form.  `.key()` is public-typed, so `parts_into_secret()` is what pulls in
     // the secret MPIs / S2K structure that make the secret packets worth
     // fuzzing; we emit those only when the secret is actually present.
     eprintln!("key-packet seeds:");
-    let kp_dir = corpus("key_packet_from_bytes");
+    let kp_dir = corpus("key-packet-from-bytes");
 
     let primary = cert.primary_key().key().clone();
     let mut primary_public = Vec::new();
@@ -242,19 +242,19 @@ fn main() -> Result<()> {
 
     // Message-shaped seeds.
     eprintln!("message seeds:");
-    write_seed(&corpus("message_from_bytes"), "literal.pgp", &literal)?;
-    write_seed(&corpus("message_from_bytes"), "signed-inline.pgp", &signed)?;
-    write_seed(&corpus("message_from_bytes"), "encrypted.pgp", &encrypted)?;
+    write_seed(&corpus("message-from-bytes"), "literal.pgp", &literal)?;
+    write_seed(&corpus("message-from-bytes"), "signed-inline.pgp", &signed)?;
+    write_seed(&corpus("message-from-bytes"), "encrypted.pgp", &encrypted)?;
 
-    write_seed(&corpus("packet_pile_from_bytes"), "cert-secret.tsk", &cert_secret)?;
-    write_seed(&corpus("packet_pile_from_bytes"), "signed-inline.pgp", &signed)?;
-    write_seed(&corpus("packet_pile_from_bytes"), "encrypted.pgp", &encrypted)?;
+    write_seed(&corpus("packet-pile-from-bytes"), "cert-secret.tsk", &cert_secret)?;
+    write_seed(&corpus("packet-pile-from-bytes"), "signed-inline.pgp", &signed)?;
+    write_seed(&corpus("packet-pile-from-bytes"), "encrypted.pgp", &encrypted)?;
 
-    write_seed(&corpus("inline_verify_from_bytes"), "signed-inline.pgp", &signed)?;
-    write_seed(&corpus("csf_verify_from_bytes"), "signed-cleartext.asc", &cleartext)?;
-    write_seed(&corpus("decrypt_from_bytes"), "encrypted.pgp", &encrypted)?;
+    write_seed(&corpus("inline-verify-from-bytes"), "signed-inline.pgp", &signed)?;
+    write_seed(&corpus("csf-verify-from-bytes"), "signed-cleartext.asc", &cleartext)?;
+    write_seed(&corpus("decrypt-from-bytes"), "encrypted.pgp", &encrypted)?;
 
-    eprintln!("generate_key_seeds: wrote {} seed files ({} bytes)",
+    eprintln!("generate-key-seeds: wrote {} seed files ({} bytes)",
               SEED_FILES.load(Ordering::Relaxed),
               SEED_BYTES.load(Ordering::Relaxed));
 
