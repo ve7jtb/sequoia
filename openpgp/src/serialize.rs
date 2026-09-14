@@ -2023,7 +2023,7 @@ impl Marshal for Signature4 {
         write_byte(o, self.hash_algo().into())?;
 
         let l = self.hashed_area().serialized_len();
-        if l > std::u16::MAX as usize {
+        if l > u16::MAX as usize {
             return Err(Error::InvalidArgument(
                 "Hashed area too large".into()).into());
         }
@@ -2031,7 +2031,7 @@ impl Marshal for Signature4 {
         self.hashed_area().serialize(o)?;
 
         let l = self.unhashed_area().serialized_len();
-        if l > std::u16::MAX as usize {
+        if l > u16::MAX as usize {
             return Err(Error::InvalidArgument(
                 "Unhashed area too large".into()).into());
         }
