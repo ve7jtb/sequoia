@@ -1228,7 +1228,7 @@ impl Signature4 {
         // The hashed area.
         let l = self.hashed_area().serialized_len()
              // Assumes well-formedness.
-            .min(std::u16::MAX as usize);
+            .min(u16::MAX as usize);
         body.extend(&(l as u16).to_be_bytes());
          // Assumes well-formedness.
         self.hashed_area().serialize(&mut body)?;

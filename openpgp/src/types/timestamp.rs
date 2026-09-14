@@ -2,7 +2,6 @@ use std::cmp;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::time::{SystemTime, Duration as SystemDuration, UNIX_EPOCH};
-use std::u32;
 
 #[cfg(test)]
 use quickcheck::{Arbitrary, Gen};
@@ -82,7 +81,7 @@ impl TryFrom<SystemTime> for Timestamp {
 
     fn try_from(t: SystemTime) -> Result<Self> {
         match t.duration_since(std::time::UNIX_EPOCH) {
-            Ok(d) if d.as_secs() <= std::u32::MAX as u64 =>
+            Ok(d) if d.as_secs() <= u32::MAX as u64 =>
                 Ok(Timestamp(d.as_secs() as u32)),
             _ => Err(Error::InvalidArgument(
                 format!("time {:?} is not representable in OpenPGP", t))
@@ -304,7 +303,7 @@ impl TryFrom<SystemDuration> for Duration {
     type Error = anyhow::Error;
 
     fn try_from(d: SystemDuration) -> Result<Self> {
-        if d.as_secs() <= std::u32::MAX as u64 {
+        if d.as_secs() <= u32::MAX as u64 {
             Ok(Duration(d.as_secs() as u32))
         } else {
             Err(Error::InvalidArgument(
@@ -451,7 +450,7 @@ impl Duration {
                     None => Ok(rounded)
                 }
             } else {
-                Ok(Self(std::u32::MAX))
+                Ok(Self(u32::MAX))
             }
         } else {
             Err(Error::InvalidArgument(

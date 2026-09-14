@@ -113,7 +113,7 @@ impl<'a, C: 'a> PartialBodyFilter<'a, C> {
 
             // Write the header.
             let l = self.buffer.len() + other.len();
-            if l > std::u32::MAX as usize {
+            if l > u32::MAX as usize {
                 unimplemented!();
             }
             BodyLength::Full(l as u32).serialize(inner).map_err(

@@ -28,7 +28,6 @@
 //! [pure]: https://en.wikipedia.org/wiki/Pure_function
 use std::fmt;
 use std::time::{SystemTime, Duration};
-use std::u32;
 
 use anyhow::Context;
 

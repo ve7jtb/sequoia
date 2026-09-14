@@ -325,8 +325,6 @@ impl S2K {
     /// `0x3e00000` if `hash_bytes` is larger than or equal
     /// `0x3e00000`.
     fn nearest_hash_count(hash_bytes: usize) -> u32 {
-        use std::usize;
-
         match hash_bytes {
             0..=1024 => 1024,
             0x3e00001..=usize::MAX => 0x3e00000,
