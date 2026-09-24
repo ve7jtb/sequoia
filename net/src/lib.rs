@@ -10,6 +10,16 @@
 //! [Web Key Directories]: https://datatracker.ietf.org/doc/html/draft-koch-openpgp-webkey-service
 //! [PKS]: https://gitlab.com/wiktor/pks
 //!
+//! # HTTP Client
+//!
+//! To use this create, you need to select an HTTP client.  Currently,
+//! this library supports [`reqwest`], which you can enable select using
+//! the `reqwest` feature.  Alternatively, you can bring your own HTTP
+//! client by implementing the [`HttpClient`] trait and passing that
+//! to the various functions.
+//!
+//! [`reqwest`]: https://crates.io/crates/reqwest
+//!
 //! # Examples
 //!
 //! This example demonstrates how to fetch a certificate from the
@@ -18,6 +28,7 @@
 //! ```no_run
 //! # use sequoia_openpgp::KeyID;
 //! # use sequoia_net::{KeyServer, Result};
+//! # #[cfg(feature = "reqwest")]
 //! # async fn f() -> Result<()> {
 //! let mut ks = KeyServer::default();
 //! let keyid: KeyID = "31855247603831FD".parse()?;
@@ -29,6 +40,7 @@
 //! This example demonstrates how to fetch a certificate using WKD:
 //!
 //! ```no_run
+//! # #[cfg(feature = "reqwest")]
 //! # async fn f() -> sequoia_net::Result<()> {
 //! let certs = sequoia_net::wkd::get(&reqwest::Client::new(), "juliett@example.org").await?;
 //! # Ok(()) }
@@ -38,12 +50,15 @@
 #![doc(html_logo_url = "https://docs.sequoia-pgp.org/logo.svg")]
 #![warn(missing_docs)]
 
+use std::sync::Arc;
+
 // Re-exports of crates that we use in our API.
+
+#[cfg(feature = "reqwest")]
 pub use reqwest;
 
 use percent_encoding::{percent_encode, AsciiSet, CONTROLS};
 
-use http::StatusCode;
 use url::Url;
 
 use sequoia_openpgp::{
@@ -81,7 +96,7 @@ const KEYSERVER_GET_ENCODE_SET: &AsciiSet = &KEYSERVER_ENCODE_SET
 /// For accessing keyservers using HKP.
 #[derive(Clone)]
 pub struct KeyServer {
-    client: reqwest::Client,
+    client: Arc<dyn HttpClient>,
     /// The original URL given to the constructor.
     url: Url,
     /// The URL we use for the requests.
@@ -90,6 +105,7 @@ pub struct KeyServer {
 
 assert_send_and_sync!(KeyServer);
 
+#[cfg(feature = "reqwest")]
 impl Default for KeyServer {
     fn default() -> Self {
 	Self::new("hkps://keys.openpgp.org/").unwrap()
@@ -97,13 +113,15 @@ impl Default for KeyServer {
 }
 
 impl KeyServer {
+    #[cfg(feature = "reqwest")]
     /// Returns a handle for the given URL.
     pub fn new(url: &str) -> Result<Self> {
-	Self::with_client(url, reqwest::Client::new())
+        Self::with_client(url, Box::new(reqwest::Client::new()))
     }
 
     /// Returns a handle for the given URL with a custom `Client`.
-    pub fn with_client(url: &str, client: reqwest::Client) -> Result<Self> {
+    pub fn with_client(url: &str, client: Box<dyn HttpClient>) -> Result<Self> {
+        let client = client.into();
         let url = Url::parse(url)?;
 
         let s = url.scheme();
@@ -142,19 +160,14 @@ impl KeyServer {
                                          -> Result<Vec<Result<Cert>>>
     {
         let handle = handle.into();
-        let url = self.request_url.join(
-            &format!("pks/lookup?op=get&options=mr&search=0x{:X}", handle))?;
+        let url = self.request_url.join(&format!(
+            "pks/lookup?op=get&options=mr&search=0x{:X}",
+            handle
+        ))?;
 
-        let res = self.client.get(url).send().await?;
-        match res.status() {
-            StatusCode::OK => {
-                let body = res.bytes().await?;
-                let certs = CertParser::from_bytes(&body)?.collect();
-                Ok(certs)
-            }
-            StatusCode::NOT_FOUND => Err(Error::NotFound.into()),
-            n => Err(Error::HttpStatus(n).into()),
-        }
+        let body = Box::into_pin(self.client.get(url)).await?;
+        let certs = CertParser::from_bytes(&body)?.collect();
+        Ok(certs)
     }
 
     /// Retrieves certificates containing the given `UserID`.
@@ -181,14 +194,9 @@ impl KeyServer {
                 percent_encode(email.as_bytes(), KEYSERVER_GET_ENCODE_SET)
             ))?;
 
-        let res = self.client.get(url).send().await?;
-        match res.status() {
-            StatusCode::OK => {
-                Ok(CertParser::from_bytes(&res.bytes().await?)?.collect())
-            },
-            StatusCode::NOT_FOUND => Err(Error::NotFound.into()),
-            n => Err(Error::HttpStatus(n).into()),
-        }
+        let body = Box::into_pin(self.client.get(url)).await?;
+        let certs = CertParser::from_bytes(&body)?.collect();
+        Ok(certs)
     }
 
     /// Sends the given key to the server.
@@ -205,18 +213,12 @@ impl KeyServer {
         let mut post_data = b"keytext=".to_vec();
         post_data.extend_from_slice(percent_encode(&armored_blob, KEYSERVER_ENCODE_SET)
                                     .collect::<String>().as_bytes());
-        let length = post_data.len();
 
-        let res = self.client.post(url)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .header("content-length", length.to_string())
-            .body(post_data).send().await?;
+        Box::into_pin(self
+            .client
+            .post(url, post_data))
+            .await
 
-        match res.status() {
-            StatusCode::OK => Ok(()),
-            StatusCode::NOT_FOUND => Err(Error::ProtocolViolation.into()),
-            n => Err(Error::HttpStatus(n).into()),
-        }
     }
 }
 
@@ -262,10 +264,53 @@ pub enum Error {
     EmailNotInUserids(String),
 }
 
+/// Helper trait to encapsulate different HTTP clients.
+pub trait HttpClient: Send + Sync {
+    /// Submit a standard GET request and return the response.
+    fn get(&'_ self, url: Url) -> Box<dyn std::future::Future<Output = Result<Vec<u8>>> + Send + '_>;
+    /// Submit a standard POST request of `Content-Type` equal to "application/x-www-form-urlencoded".
+    fn post(&'_ self, url: Url, post_data: Vec<u8>) -> Box<dyn std::future::Future<Output = Result<()>> + Send + '_>;
+}
+
+#[cfg(feature = "reqwest")]
+impl HttpClient for reqwest::Client {
+    fn get(&'_ self, url: Url) -> Box<dyn std::future::Future<Output = Result<Vec<u8>>> + Send + '_> {
+        Box::new(async {
+            let res = self.get(url).send().await?;
+            match res.status() {
+                http::StatusCode::OK => {
+                    Ok(res.bytes().await?.to_vec())
+                }
+                http::StatusCode::NOT_FOUND => Err(Error::NotFound.into()),
+                n => Err(Error::HttpStatus(n).into()),
+            }
+        })
+    }
+
+    fn post(&'_ self, url: Url, post_data: Vec<u8>) -> Box<dyn std::future::Future<Output = Result<()>> + Send + '_> {
+        Box::new(async {
+            let res = self
+                .post(url)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("content-length", post_data.len().to_string())
+                .body(post_data)
+                .send()
+                .await?;
+
+            match res.status() {
+                http::StatusCode::OK => Ok(()),
+                http::StatusCode::NOT_FOUND => Err(Error::ProtocolViolation.into()),
+                n => Err(Error::HttpStatus(n).into()),
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(feature = "reqwest")]
     #[test]
     fn urls() {
         assert!(KeyServer::new("keys.openpgp.org").is_err());

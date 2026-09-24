@@ -1,3 +1,4 @@
+#![cfg(feature = "reqwest")]
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use http::{Request, Response};

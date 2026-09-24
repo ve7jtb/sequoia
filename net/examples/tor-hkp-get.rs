@@ -4,10 +4,11 @@ use std::{
     time::Duration,
 };
 
+use sequoia_openpgp::Result;
+
 use sequoia_openpgp::{
     self as openpgp,
     Fingerprint,
-    Result,
     serialize::Serialize,
 };
 
@@ -37,7 +38,7 @@ async fn main() -> Result<()> {
     // Connect to keys.openpgp.org over Tor.
     let keyserver = KeyServer::with_client(
         "hkp://zkaan2xfbuxia2wpf7ofnkbz6r5zdbbvxbunvp5g2iebopbfc4iqmbad.onion",
-        client)?;
+        Box::new(client))?;
 
     // Finally, get the requested certificate.
     for cert in keyserver.get(handle).await? {
