@@ -37,7 +37,7 @@ use percent_encoding::percent_encode;
 use crate::KEYSERVER_GET_ENCODE_SET;
 
 use crate::email::EmailAddress;
-use crate::Result;
+use crate::{HttpClient, Result};
 
 /// WKD variants.
 ///
@@ -222,6 +222,7 @@ fn parse_body<S: AsRef<str>>(body: &[u8], email_address: S)
 /// ```no_run
 /// # use sequoia_net::{Result, wkd};
 /// # use sequoia_openpgp::Cert;
+/// # #[cfg(feature = "reqwest")]
 /// # async fn f() -> Result<()> {
 /// let email_address = "foo@bar.baz";
 /// let certs: Vec<Result<Cert>> =
@@ -231,7 +232,7 @@ fn parse_body<S: AsRef<str>>(body: &[u8], email_address: S)
 /// ```
 // XXX: Maybe the direct method should be tried on other errors too.
 // https://mailarchive.ietf.org/arch/msg/openpgp/6TxZc2dQFLKXtS0Hzmrk963EteE
-pub async fn get<S: AsRef<str>>(c: &reqwest::Client, email_address: S)
+pub async fn get<S: AsRef<str>, Client: HttpClient>(c: &Client, email_address: S)
                                 -> Result<Vec<Result<Cert>>>
 {
     let email = email_address.as_ref().to_string();
@@ -242,19 +243,14 @@ pub async fn get<S: AsRef<str>>(c: &reqwest::Client, email_address: S)
     let direct_uri = wkd_url.to_url(Variant::Direct)?;
 
     // First, try the Advanced Method.
-    let res = if let Ok(res) = c.get(advanced_uri).send().await {
+    let body = if let Ok(res) = Box::into_pin(c.get(advanced_uri)).await {
         Ok(res)
     } else {
         // Fall back to the Direct Method.
-        c.get(direct_uri).send().await
-    }.map_err(Error::NotFound)?;
+        Box::into_pin(c.get(direct_uri)).await
+    }?;
 
-    if res.status() == http::StatusCode::OK {
-        let body = res.bytes().await?;
-        parse_body(&body, &email)
-    } else {
-        Err(crate::Error::NotFound.into())
-    }
+    parse_body(&body, &email)
 }
 
 /// Returns all e-mail addresses from certificate's User IDs matching `domain`.
@@ -372,15 +368,6 @@ impl KeyRing {
         }
         Ok(())
     }
-}
-
-/// Errors for this module.
-#[derive(thiserror::Error, Debug)]
-#[non_exhaustive]
-pub enum Error {
-    /// A requested cert was not found.
-    #[error("Cert not found")]
-    NotFound(#[from] reqwest::Error),
 }
 
 #[cfg(test)]

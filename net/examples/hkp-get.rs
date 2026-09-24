@@ -3,9 +3,10 @@ use std::{
     io,
 };
 
+use sequoia_openpgp::Result;
+
 use sequoia_openpgp::{
     Fingerprint,
-    Result,
     serialize::Serialize,
 };
 
