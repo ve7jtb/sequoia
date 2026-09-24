@@ -43,10 +43,8 @@ pub use reqwest;
 
 use percent_encoding::{percent_encode, AsciiSet, CONTROLS};
 
-use reqwest::{
-    StatusCode,
-    Url,
-};
+use http::StatusCode;
+use url::Url;
 
 use sequoia_openpgp::{
     self as openpgp,
@@ -106,7 +104,7 @@ impl KeyServer {
 
     /// Returns a handle for the given URL with a custom `Client`.
     pub fn with_client(url: &str, client: reqwest::Client) -> Result<Self> {
-        let url = reqwest::Url::parse(url)?;
+        let url = Url::parse(url)?;
 
         let s = url.scheme();
         match s {
@@ -130,7 +128,7 @@ impl KeyServer {
     }
 
     /// Returns the keyserver's base URL.
-    pub fn url(&self) -> &reqwest::Url {
+    pub fn url(&self) -> &Url {
         &self.url
     }
 

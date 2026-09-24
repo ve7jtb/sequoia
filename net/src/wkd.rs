@@ -113,9 +113,9 @@ impl Url {
     }
 
     /// Returns an [`url::Url`].
-    pub fn to_url<V>(&self, variant: V) -> Result<reqwest::Url>
+    pub fn to_url<V>(&self, variant: V) -> Result<url::Url>
             where V: Into<Option<Variant>> {
-        Ok(reqwest::Url::parse(self.build(variant).as_str())?)
+        Ok(url::Url::parse(self.build(variant).as_str())?)
     }
 
     /// Returns a [`PathBuf`].
@@ -249,7 +249,7 @@ pub async fn get<S: AsRef<str>>(c: &reqwest::Client, email_address: S)
         c.get(direct_uri).send().await
     }.map_err(Error::NotFound)?;
 
-    if res.status() == reqwest::StatusCode::OK {
+    if res.status() == http::StatusCode::OK {
         let body = res.bytes().await?;
         parse_body(&body, &email)
     } else {
@@ -413,9 +413,9 @@ mod tests {
              stnkabub89rpcphiz4ppbxixkwyt1pic?l=test1";
         let wkd_url = Url::from("test1@example.com").unwrap();
         assert_eq!(expected_url, wkd_url.to_string());
-        assert_eq!(reqwest::Url::parse(expected_url).unwrap(),
+        assert_eq!(url::Url::parse(expected_url).unwrap(),
                    wkd_url.to_url(None).unwrap());
-        assert_eq!(expected_url.parse::<reqwest::Url>().unwrap(),
+        assert_eq!(expected_url.parse::<url::Url>().unwrap(),
                    wkd_url.to_url(None).unwrap());
 
         // Direct method
@@ -424,9 +424,9 @@ mod tests {
              .well-known/openpgpkey/hu/\
              stnkabub89rpcphiz4ppbxixkwyt1pic?l=test1";
         assert_eq!(expected_url, wkd_url.build(Direct));
-        assert_eq!(reqwest::Url::parse(expected_url).unwrap(),
+        assert_eq!(url::Url::parse(expected_url).unwrap(),
                    wkd_url.to_url(Direct).unwrap());
-        assert_eq!(expected_url.parse::<reqwest::Url>().unwrap(),
+        assert_eq!(expected_url.parse::<url::Url>().unwrap(),
                    wkd_url.to_url(Direct).unwrap());
     }
 
