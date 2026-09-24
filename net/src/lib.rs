@@ -13,12 +13,14 @@
 //! # HTTP Client
 //!
 //! To use this create, you need to select an HTTP client.  Currently,
-//! this library supports [`reqwest`], which you can enable select using
-//! the `reqwest` feature.  Alternatively, you can bring your own HTTP
-//! client by implementing the [`HttpClient`] trait and passing that
-//! to the various functions.
+//! this library supports [`rewqest`] and [`isahc`], which you can
+//! enable select using the `reqwest` and `isahc` features,
+//! respectively.  Alternatively, you can bring your own HTTP client
+//! by implementing the [`HttpClient`] trait and passing that to the
+//! various functions.
 //!
-//! [`reqwest`]: https://crates.io/crates/reqwest
+//! [`rewqest`]: https://crates.io/crates/reqwest
+//! [`isahc`]: https://crates.io/crates/isahc
 //!
 //! # Examples
 //!
@@ -28,7 +30,7 @@
 //! ```no_run
 //! # use sequoia_openpgp::KeyID;
 //! # use sequoia_net::{KeyServer, Result};
-//! # #[cfg(feature = "reqwest")]
+//! # #[cfg(any(feature = "reqwest", feature = "isahc"))]
 //! # async fn f() -> Result<()> {
 //! let mut ks = KeyServer::default();
 //! let keyid: KeyID = "31855247603831FD".parse()?;
@@ -40,7 +42,7 @@
 //! This example demonstrates how to fetch a certificate using WKD:
 //!
 //! ```no_run
-//! # #[cfg(feature = "reqwest")]
+//! # #[cfg(any(feature = "reqwest"))]
 //! # async fn f() -> sequoia_net::Result<()> {
 //! let certs = sequoia_net::wkd::get(&reqwest::Client::new(), "juliett@example.org").await?;
 //! # Ok(()) }
@@ -54,6 +56,8 @@ use std::sync::Arc;
 
 // Re-exports of crates that we use in our API.
 
+#[cfg(feature = "isahc")]
+pub use isahc;
 #[cfg(feature = "reqwest")]
 pub use reqwest;
 
@@ -105,7 +109,7 @@ pub struct KeyServer {
 
 assert_send_and_sync!(KeyServer);
 
-#[cfg(feature = "reqwest")]
+#[cfg(any(feature = "reqwest", feature = "isahc"))]
 impl Default for KeyServer {
     fn default() -> Self {
 	Self::new("hkps://keys.openpgp.org/").unwrap()
@@ -113,10 +117,18 @@ impl Default for KeyServer {
 }
 
 impl KeyServer {
-    #[cfg(feature = "reqwest")]
+    #[allow(unreachable_code)]
+    #[cfg(any(feature = "reqwest", feature = "isahc"))]
     /// Returns a handle for the given URL.
     pub fn new(url: &str) -> Result<Self> {
-        Self::with_client(url, Box::new(reqwest::Client::new()))
+        #[cfg(feature = "reqwest")]
+        {
+            return Self::with_client(url, Box::new(reqwest::Client::new()));
+        }
+        #[cfg(feature = "isahc")]
+        {
+            Self::with_client(url, Box::new(isahc::HttpClient::new()?))
+        }
     }
 
     /// Returns a handle for the given URL with a custom `Client`.
@@ -306,11 +318,49 @@ impl HttpClient for reqwest::Client {
     }
 }
 
+#[cfg(feature = "isahc")]
+impl HttpClient for isahc::HttpClient {
+    fn get(
+        &'_ self,
+        url: Url,
+    ) -> Box<dyn std::future::Future<Output = Result<Vec<u8>>> + Send + '_> {
+        use isahc::AsyncReadResponseExt;
+        Box::new(async move {
+            let mut res = self.get_async(url.as_str()).await?;
+            match res.status() {
+                http::StatusCode::OK => Ok(res.bytes().await?.to_vec()),
+                http::StatusCode::NOT_FOUND => Err(Error::NotFound.into()),
+                n => Err(Error::HttpStatus(n).into()),
+            }
+        })
+    }
+
+    fn post(
+        &'_ self,
+        url: Url,
+        post_data: Vec<u8>,
+    ) -> Box<dyn std::future::Future<Output = Result<()>> + Send + '_> {
+        Box::new(async move {
+            let request = isahc::Request::post(url.as_str())
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("Content-Length", post_data.len().to_string())
+                .body(post_data)?;
+            let res = self.send_async(request).await?;
+
+            match res.status() {
+                http::StatusCode::OK => Ok(()),
+                http::StatusCode::NOT_FOUND => Err(Error::ProtocolViolation.into()),
+                n => Err(Error::HttpStatus(n).into()),
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[cfg(feature = "reqwest")]
+    #[cfg(any(feature = "reqwest", feature = "isahc"))]
     #[test]
     fn urls() {
         assert!(KeyServer::new("keys.openpgp.org").is_err());
