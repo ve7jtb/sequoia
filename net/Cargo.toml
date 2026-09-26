@@ -25,6 +25,21 @@ maintenance = { status = "actively-developed" }
 default = []
 dane-client = ["dep:hickory-resolver"]
 
+# sequoia-openpgp
+crypto-botan = ["sequoia-openpgp/crypto-botan"]
+crypto-botan2 = ["sequoia-openpgp/crypto-botan2"]
+crypto-cng = ["sequoia-openpgp/crypto-cng"]
+crypto-nettle = ["sequoia-openpgp/crypto-nettle"]
+crypto-openssl = ["sequoia-openpgp/crypto-openssl"]
+crypto-rust = ["sequoia-openpgp/crypto-rust"]
+
+allow-experimental-crypto = ["sequoia-openpgp/allow-experimental-crypto"]
+allow-variable-time-crypto = ["sequoia-openpgp/allow-variable-time-crypto"]
+
+compression = ["sequoia-openpgp/compression"]
+compression-deflate = ["sequoia-openpgp/compression-deflate"]
+compression-bzip2 = ["sequoia-openpgp/compression-bzip2"]
+
 [dependencies]
 sequoia-openpgp = { version = "2", path = "../openpgp", default-features = false }
 
