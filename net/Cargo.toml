@@ -32,7 +32,6 @@ sequoia-openpgp = { version = "2", path = "../openpgp", default-features = false
 
 anyhow = "1.0.18"
 http = "1"
-hyper = { version = "1", features = [ "http1", "http2" ] }
 percent-encoding = "2.1"
 reqwest = { version = "0.13", optional = true }
 isahc = { version = "2.0.1", optional = true }

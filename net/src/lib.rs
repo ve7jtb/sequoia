@@ -255,16 +255,13 @@ pub enum Error {
     ProtocolViolation,
     /// Encountered an unexpected low-level http status.
     #[error("server returned status {0}")]
-    HttpStatus(hyper::StatusCode),
-    /// A `hyper::error::UrlError` occurred.
+    HttpStatus(http::StatusCode),
+    /// A `url::ParseError` occurred.
     #[error(transparent)]
     UrlError(#[from] url::ParseError),
     /// A `http::Error` occurred.
     #[error(transparent)]
     HttpError(#[from] http::Error),
-    /// A `hyper::Error` occurred.
-    #[error(transparent)]
-    HyperError(#[from] hyper::Error),
 
     /// wkd errors:
     /// An email address is malformed
