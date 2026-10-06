@@ -95,21 +95,11 @@ impl Asymmetric for super::Backend {
     }
 
     fn x25519_generate_key() -> Result<(Protected, [u8; 32])> {
-        use x25519_dalek::{StaticSecret, PublicKey};
+        let mut secret = Protected::new(32);
+        crate::crypto::random(&mut secret)?;
 
-        // x25519_dalek v2.0 doesn't reexport OsRng.  It
-        // depends on rand_core 0.6.
-        use rand_core::OsRng;
-
-        let secret = StaticSecret::random_from_rng(&mut OsRng);
-        let public = PublicKey::from(&secret);
-        let mut secret_bytes = secret.to_bytes();
-        let secret: Protected = secret_bytes.into();
-        unsafe {
-            memsec::memzero(secret_bytes.as_mut_ptr(), secret_bytes.len());
-        }
-
-        Ok((secret, public.to_bytes()))
+        let public = Self::x25519_derive_public(&secret)?;
+        Ok((secret, public))
     }
 
     fn x25519_derive_public(secret: &Protected) -> Result<[u8; 32]> {
@@ -129,7 +119,7 @@ impl Asymmetric for super::Backend {
     }
 
     fn ed25519_generate_key() -> Result<(Protected, [u8; 32])> {
-        use rand_core::OsRng as OsRng;
+        use ed25519_dalek::ed25519::signature::rand_core::OsRng;
         let pair = ed25519_dalek::SigningKey::generate(&mut OsRng);
         Ok((pair.to_bytes().into(), pair.verifying_key().to_bytes()))
     }
@@ -191,7 +181,7 @@ impl Asymmetric for super::Backend {
     }
 
     fn ed448_generate_key() -> Result<(Protected, [u8; 57])> {
-        use cx448::rand_core::OsRng as OsRng;
+        use cx448::rand_core::OsRng;
         let pair = cx448::SigningKey::generate(OsRng);
         Ok(((&pair.as_bytes()[..]).into(), pair.verifying_key().to_bytes()))
     }
@@ -235,7 +225,7 @@ impl Asymmetric for super::Backend {
                 format!("Key size {} is not supported", n)).into()),
         };
 
-        let mut rng = rand_core::OsRng;
+        let mut rng = dsa::signature::rand_core::OsRng;
         let components = dsa::Components::generate(&mut rng, size);
         let p = components.p().into();
         let q = components.q().into();
@@ -368,9 +358,7 @@ impl Asymmetric for super::Backend {
 
     fn slhdsa128s_generate_key() -> Result<(Protected, [u8; 32])> {
         use slh_dsa::{Shake128s, SigningKey};
-        // slh-dsa 0.0.3 doesn't reexport OsRng.
-        // It depends on rand_core 0.6.
-        use rand_core::OsRng;
+        use slh_dsa::signature::rand_core::OsRng;
 
         let signing_key = SigningKey::<Shake128s>::new(&mut OsRng);
         let public = signing_key.as_ref().to_bytes().into();
@@ -412,9 +400,7 @@ impl Asymmetric for super::Backend {
 
     fn slhdsa128f_generate_key() -> Result<(Protected, [u8; 32])> {
         use slh_dsa::{Shake128f, SigningKey};
-        // slh-dsa 0.0.3 doesn't reexport OsRng.
-        // It depends on rand_core 0.6.
-        use rand_core::OsRng;
+        use slh_dsa::signature::rand_core::OsRng;
 
         let signing_key = SigningKey::<Shake128f>::new(&mut OsRng);
         let public = signing_key.as_ref().to_bytes().into();
@@ -456,9 +442,7 @@ impl Asymmetric for super::Backend {
 
     fn slhdsa256s_generate_key() -> Result<(Protected, Box<[u8; 64]>)> {
         use slh_dsa::{Shake256s, SigningKey};
-        // slh-dsa 0.0.3 doesn't reexport OsRng.
-        // It depends on rand_core 0.6.
-        use rand_core::OsRng;
+        use slh_dsa::signature::rand_core::OsRng;
 
         let signing_key = SigningKey::<Shake256s>::new(&mut OsRng);
         let public = Box::new(signing_key.as_ref().to_bytes().into());
