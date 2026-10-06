@@ -5471,7 +5471,7 @@ mod test {
     fn key_revoked() {
         use crate::types::Features;
         use crate::packet::key::Key6;
-        use rand::{rng, Rng, distr::Open01};
+        use rand::{rng, RngExt, distr::Open01};
 
         let p = &P::new();
 

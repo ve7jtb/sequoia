@@ -21,9 +21,9 @@ impl super::interface::Backend for Backend {
     }
 
     fn random(buf: &mut [u8]) -> Result<()> {
-        use rand::rngs::OsRng;
-        use rand::TryRngCore;
-        OsRng.try_fill_bytes(buf)?;
+        use rand::rngs::SysRng;
+        use rand::TryRng;
+        SysRng.try_fill_bytes(buf)?;
         Ok(())
     }
 }

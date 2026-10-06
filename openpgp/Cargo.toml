@@ -86,7 +86,7 @@ ocb3 = { version = "0.1", default-features = false, optional = true }
 p256 = { version = "0.13", optional = true, features = ["ecdh", "ecdsa"] }
 p384 = { version = "0.13", optional = true, features = ["ecdh", "ecdsa"] }
 p521 = { version = "0.13", optional = true, features = ["ecdh", "ecdsa"] }
-rand = { version = "0.9", optional = true, default-features = false, features = ["os_rng", "std"] }
+rand = { version = "0.10", optional = true, default-features = false, features = ["sys_rng"] }
 ripemd = { version = "0.1", features = ["oid"], optional = true }
 rsa = { version = "0.9.0", optional = true }
 sha2 = { version = "0.10", features = ["oid"], optional = true }
@@ -114,7 +114,7 @@ lalrpop = { version = ">=0.20, <0.24", default-features = false }
 
 [dev-dependencies]
 quickcheck = { version = "1", default-features = false }
-rand = { version = "0.9", default-features = false, features = ["thread_rng"] }
+rand = { version = "0.10", default-features = false, features = ["thread_rng"] }
 rpassword = "7.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 
