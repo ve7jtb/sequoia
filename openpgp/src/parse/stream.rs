@@ -2378,7 +2378,8 @@ impl<'a, H: VerificationHelper + DecryptionHelper> Decryptor<'a, H> {
             oppr: None,
             identity: None,
             structure: IMessageStructure::new(),
-            buffer_size,
+            // Do not accept unreasonably small buffer sizes.
+            buffer_size: buffer_size.max(1024),
             reserve: None,
             cursor: 0,
             mode,
@@ -4523,6 +4524,70 @@ xHUDBRY0WIQ+50WENDPP";
             check_detached_sig(cert_file, detached_sig, data.as_bytes())
                 .expect("valid signature");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn underflow_in_decryptor_read_helper() -> Result<()> {
+        use std::io::Write;
+
+        use crate::policy::StandardPolicy;
+        use crate::serialize::stream::LiteralWriter;
+        use crate::serialize::stream::Message;
+        use crate::serialize::stream::Signer;
+
+        /// Helper for verification
+        struct VHelper {
+            certs: Vec<Cert>,
+        }
+
+        impl VHelper {
+            fn new(certs: Vec<Cert>) -> Self {
+                Self { certs }
+            }
+        }
+
+        impl VerificationHelper for VHelper {
+            fn get_certs(&mut self, _ids: &[KeyHandle]) -> Result<Vec<Cert>> {
+                Ok(std::mem::take(&mut self.certs))
+            }
+            fn check(&mut self, _structure: MessageStructure) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let p = StandardPolicy::new();
+
+        // Create a test certificate with signing capability
+        let (cert, _) = CertBuilder::new()
+            .add_signing_subkey()
+            .generate()?;
+
+        // Create a valid signed OpenPGP message
+        let mut signed_msg = Vec::new();
+        {
+            let key = cert.keys().with_policy(&p, None).for_signing().next().unwrap().key();
+            let keypair = key.clone().parts_into_secret()?.into_keypair()?;
+
+            let m = Message::new(&mut signed_msg);
+            let signer = Signer::new(m, keypair)?.build()?;
+            let mut ls = LiteralWriter::new(signer).build()?;
+            ls.write_all(b"Hello, this is a test message for the PoC!")?;
+            ls.finalize()?;
+        }
+
+        // Make sure small (pathological) buffer sizes don't cause a
+        // panic (e.g., due to underflow).
+        let h = VHelper::new(vec![cert.clone()]);
+
+        let mut verifier = VerifierBuilder::from_bytes(&signed_msg)?
+            .buffer_size(1)
+            .with_policy(&p, None, h)?;
+
+        let mut output = Vec::new();
+
+        verifier.read_to_end(&mut output)?;
+
         Ok(())
     }
 }
