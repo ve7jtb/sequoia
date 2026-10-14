@@ -3471,7 +3471,7 @@ dependencies = [
 
 [[package]]
 name = "sequoia-net"
-version = "0.30.1"
+version = "0.31.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
