@@ -222,18 +222,37 @@ fn parse_body<S: AsRef<str>>(body: &[u8], email_address: S)
 /// ```no_run
 /// # use sequoia_net::{Result, wkd};
 /// # use sequoia_openpgp::Cert;
-/// # #[cfg(feature = "reqwest")]
+/// # #[cfg(any(feature = "reqwest", feature = "isahc"))]
 /// # async fn f() -> Result<()> {
 /// let email_address = "foo@bar.baz";
-/// let certs: Vec<Result<Cert>> =
-///     wkd::get(&reqwest::Client::new(), &email_address).await?;
+/// let certs: Vec<Result<Cert>> = wkd::get(&email_address).await?;
 /// # Ok(())
 /// # }
 /// ```
+#[cfg(any(feature = "reqwest", feature = "isahc"))]
+pub async fn get<S: AsRef<str>>(email_address: S)
+                                -> Result<Vec<Result<Cert>>>
+{
+    #[cfg(feature = "reqwest")]
+    {
+        return get_with_client(&reqwest::Client::new(), email_address).await;
+    }
+    #[cfg(feature = "isahc")]
+    {
+        return get_with_client(
+            &isahc::HttpClient::new()?, email_address).await;
+    }
+}
+
+/// Retrieves the Certs that contain userids with a given email address
+/// from a Web Key Directory URL.
+///
+/// This is like [`get`](crate::wkd::get), but takes an [`HttpClient`].
 // XXX: Maybe the direct method should be tried on other errors too.
 // https://mailarchive.ietf.org/arch/msg/openpgp/6TxZc2dQFLKXtS0Hzmrk963EteE
-pub async fn get<S: AsRef<str>, Client: HttpClient>(c: &Client, email_address: S)
-                                -> Result<Vec<Result<Cert>>>
+pub async fn get_with_client<S: AsRef<str>, Client: HttpClient>(
+    c: &Client, email_address: S)
+    -> Result<Vec<Result<Cert>>>
 {
     let email = email_address.as_ref().to_string();
     // First, prepare URIs and client.

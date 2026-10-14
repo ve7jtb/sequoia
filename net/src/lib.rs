@@ -42,9 +42,9 @@
 //! This example demonstrates how to fetch a certificate using WKD:
 //!
 //! ```no_run
-//! # #[cfg(any(feature = "reqwest"))]
+//! # #[cfg(any(feature = "reqwest", feature = "isahc"))]
 //! # async fn f() -> sequoia_net::Result<()> {
-//! let certs = sequoia_net::wkd::get(&reqwest::Client::new(), "juliett@example.org").await?;
+//! let certs = sequoia_net::wkd::get("juliett@example.org").await?;
 //! # Ok(()) }
 //! ```
 
