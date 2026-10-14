@@ -8,6 +8,7 @@ include:
   - component: "gitlab.com/sequoia-pgp/common-ci/sequoia-pipeline@main"
     inputs:
       extra_args: "-- --skip leak_tests"
+      extra_features: ",sequoia-net/reqwest,sequoia-net/isahc"
 
 fuzzing:
   image: registry.sequoia-pgp.org/sequoia-pgp/build-docker-image/trixie-prebuild
