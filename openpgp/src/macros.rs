@@ -87,6 +87,7 @@ macro_rules! time_it {
         // using break 'label) still works.
         struct Timer {
             start: SystemTime,
+            label: String,
         }
         impl Drop for Timer {
             fn drop(&mut self) {
@@ -94,15 +95,15 @@ macro_rules! time_it {
                 if elapsed.clone().unwrap_or(Duration::from_millis($ms_threshold))
                     >= Duration::from_millis($ms_threshold)
                 {
-                    if $label.len() > 0 {
-                        eprint!("{}:", $label);
+                    if self.label.len() > 0 {
+                        eprint!("{}:", self.label);
                     }
                     eprintln!("{}:{}: {:?}", file!(), line!(), elapsed);
                 }
             }
         }
 
-        let _start = Timer { start: SystemTime::now() };
+        let _start = Timer { start: SystemTime::now(), label: String::from($label), };
         $body
     }};
     ( $label:expr, $body:expr ) => {
