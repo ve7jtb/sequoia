@@ -4,6 +4,12 @@
 #+STARTUP: content hidestars
 
 
+* Changes in 2.5.0
+** New functionality
+   - serialize::stream::Signer::with_userid
+   - serialize::stream::Signer::with_template_and_userid
+   - serialize::stream::Signer::add_signer_with_userid
+
 * Changes in 2.4.1
 ** Notable fixes
    - When compiling against OpenSSL v3, configure the OpenSSL library

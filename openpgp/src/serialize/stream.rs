@@ -654,7 +654,7 @@ pub struct Signer<'a> {
     // digests.
     inner: Option<writer::BoxStack<'a, Cookie>>,
     signers: Vec<(Box<dyn crypto::Signer + Send + Sync + 'a>,
-                  HashAlgorithm, Vec<u8>)>,
+                  HashAlgorithm, Vec<u8>, Option<UserID>)>,
 
     /// The set of acceptable hashes.
     acceptable_hash_algos: Vec<HashAlgorithm>,
@@ -759,8 +759,28 @@ impl<'a> Signer<'a> {
     pub fn new<S>(inner: Message<'a>, signer: S) -> Result<Self>
         where S: crypto::Signer + Send + Sync + 'a
     {
-        Self::with_template(inner, signer,
-                            signature::SignatureBuilder::new(SignatureType::Binary))
+        Self::with_userid(inner, signer, None)
+    }
+
+    /// Creates a signer.
+    ///
+    /// Like [`Signer::new`] but also specifies the signer's user ID,
+    /// which is added to the signature in the [Signer's User ID]
+    /// subpacket.  This can be used to distinguish whether someone is
+    /// signing a message in a private role, or as a member of an
+    /// organization, for example.
+    ///
+    /// [Signer's User ID]: https://www.rfc-editor.org/rfc/rfc9580.html#name-signers-user-id
+    pub fn with_userid<S, U>(inner: Message<'a>, signer: S, userid: U)
+        -> Result<Self>
+    where
+        S: crypto::Signer + Send + Sync + 'a,
+        U: Into<Option<UserID>>,
+    {
+        Self::with_template_and_userid(
+            inner, signer,
+            signature::SignatureBuilder::new(SignatureType::Binary),
+            userid.into())
     }
 
     /// Creates a signer with a given signature template.
@@ -823,10 +843,30 @@ impl<'a> Signer<'a> {
     /// message.finalize()?;
     /// # Ok(()) }
     /// ```
-    pub fn with_template<S, T>(inner: Message<'a>, signer: S, template: T)
-                               -> Result<Self>
+    pub fn with_template<S, T>(
+        inner: Message<'a>, signer: S, template: T)
+        -> Result<Self>
         where S: crypto::Signer + Send + Sync + 'a,
               T: Into<signature::SignatureBuilder>,
+    {
+        Self::with_template_and_userid(inner, signer, template, None)
+    }
+
+    /// Creates a signer with a given signature template.
+    ///
+    /// Like [`Signer::with_template`] but also specifies the signer's
+    /// user ID, which is added to the signature in the [Signer's User
+    /// ID] subpacket.  This can be used to distinguish whether
+    /// someone is signing a message in a private role, or as a member
+    /// of an organization, for example.
+    ///
+    /// [Signer's User ID]: https://www.rfc-editor.org/rfc/rfc9580.html#name-signers-user-id
+    pub fn with_template_and_userid<S, T, U>(
+        inner: Message<'a>, signer: S, template: T, userid: U)
+        -> Result<Self>
+        where S: crypto::Signer + Send + Sync + 'a,
+              T: Into<signature::SignatureBuilder>,
+              U: Into<Option<UserID>>,
     {
         let inner = writer::BoxStack::from(inner);
         let level = inner.cookie_ref().level + 1;
@@ -846,7 +886,7 @@ impl<'a> Signer<'a> {
                 private: Private::Signer,
             },
             position: 0,
-        }.add_signer(signer)
+        }.add_signer_with_userid(signer, userid.into())
     }
 
     /// Creates a signer for a detached signature.
@@ -1084,8 +1124,26 @@ impl<'a> Signer<'a> {
     /// message.finalize()?;
     /// # Ok(()) }
     /// ```
-    pub fn add_signer<S>(mut self, signer: S) -> Result<Self>
+    pub fn add_signer<S>(self, signer: S) -> Result<Self>
         where S: crypto::Signer + Send + Sync + 'a
+    {
+        self.add_signer_with_userid(signer, None)
+    }
+
+    /// Adds an additional signer and specifies the signer's user ID.
+    ///
+    /// Like [`Signer::add_signer`] but also specifies the signer's
+    /// user ID, which is added to the signature in the [Signer's User
+    /// ID] subpacket.  This can be used to distinguish whether
+    /// someone is signing a message in a private role, or as a member
+    /// of an organization, for example.
+    ///
+    /// [Signer's User ID]: https://www.rfc-editor.org/rfc/rfc9580.html#name-signers-user-id
+    pub fn add_signer_with_userid<S, U>(mut self, signer: S, userid: U)
+        -> Result<Self>
+    where
+        S: crypto::Signer + Send + Sync + 'a,
+        U: Into<Option<UserID>>,
     {
         // Update the set of acceptable hash algorithms.
         let is_sorted = |data: &[HashAlgorithm]| {
@@ -1112,7 +1170,8 @@ impl<'a> Signer<'a> {
             }
         }
 
-        self.signers.push((Box::new(signer), Default::default(), Vec::new()));
+        self.signers.push((Box::new(signer), Default::default(), Vec::new(),
+                           userid.into()));
         Ok(self)
     }
 
@@ -1311,11 +1370,11 @@ impl<'a> Signer<'a> {
         assert!(self.inner.is_some(), "The constructor adds an inner writer.");
 
         // Possibly configure any armor writer above us.
-        if self.signers.iter().all(|(kp, _, _)| kp.public().version() > 4) {
+        if self.signers.iter().all(|(kp, _, _, _)| kp.public().version() > 4) {
             writer::Armorer::set_profile(&mut self, Profile::RFC9580);
         }
 
-        for (keypair, signer_hash, signer_salt) in self.signers.iter_mut() {
+        for (keypair, signer_hash, signer_salt, _) in self.signers.iter_mut() {
             let algo = if let Some(a) = self.hash_algo {
                 a
             } else {
@@ -1369,7 +1428,7 @@ impl<'a> Signer<'a> {
                 // For every key we collected, build and emit a one pass
                 // signature packet.
                 let signers_count = self.signers.len();
-                for (i, (keypair, hash_algo, salt)) in
+                for (i, (keypair, hash_algo, salt, _)) in
                     self.signers.iter().enumerate()
                 {
                     let last = i == signers_count - 1;
@@ -1411,7 +1470,7 @@ impl<'a> Signer<'a> {
                 let mut sink = self.inner.take().unwrap();
                 writeln!(sink, "-----BEGIN PGP SIGNED MESSAGE-----")?;
                 let mut hashes = self.signers.iter().filter_map(
-                    |(keypair, algo, _)| if keypair.public().version() == 4 {
+                    |(keypair, algo, _, _)| if keypair.public().version() == 4 {
                         Some(algo)
                     } else {
                         None
@@ -1466,7 +1525,7 @@ impl<'a> Signer<'a> {
             // Emit the signatures in reverse, so that the
             // one-pass-signature and signature packets "bracket" the
             // message.
-            for (signer, algo, signer_salt) in self.signers.iter_mut().rev() {
+            for (signer, algo, signer_salt, userid) in self.signers.iter_mut().rev() {
                 let (mut sig, hash) = match signer.public().version() {
                     4 => {
                         // V4 signature.
@@ -1484,7 +1543,10 @@ impl<'a> Signer<'a> {
                             .expect("we put it in there");
 
                         // Make and hash a signature packet.
-                        let sig = self.template.clone();
+                        let mut sig = self.template.clone();
+                        if let Some(userid) = userid {
+                            sig = sig.set_signers_user_id(userid.value())?;
+                        }
 
                         (sig, hash)
                     },
@@ -1499,8 +1561,11 @@ impl<'a> Signer<'a> {
                             .expect("we put it in there");
 
                         // Make and hash a signature packet.
-                        let sig = self.template.clone()
+                        let mut sig = self.template.clone()
                             .set_prefix_salt(signer_salt.clone()).0;
+                        if let Some(userid) = userid {
+                            sig = sig.set_signers_user_id(userid.value())?;
+                        }
 
                         (sig, hash)
                     },
@@ -4540,6 +4605,99 @@ mod test {
             verifier.read_to_end(&mut content).unwrap();
             assert_eq!(test_message, content.as_slice());
         }
+        Ok(())
+    }
+
+    /// Tests that we correctly set the signer's user ID.
+    #[test]
+    fn signers_userid() -> Result<()> {
+        use crate::{
+            packet::key::{Key4, PrimaryRole},
+            types::Curve,
+        };
+
+        let signer_a =
+            Key4::<_, PrimaryRole>::generate_ecc(true, Curve::Ed25519)?
+            .into_keypair()?;
+
+        let signer_b =
+            Key4::<_, PrimaryRole>::generate_ecc(true, Curve::Ed25519)?
+            .into_keypair()?;
+
+        let userid1 = UserID::from("one");
+        let userid2 = UserID::from("22222");
+
+        for signers in [
+            // One signer.
+            &[(signer_a.clone(), None)][..],
+            &[(signer_a.clone(), Some(&userid1))][..],
+
+            // Multiple signers.
+            &[(signer_a.clone(), None), (signer_b.clone(), None)][..],
+            &[(signer_a.clone(), None), (signer_b.clone(), Some(&userid1))][..],
+            &[(signer_a.clone(), Some(&userid1)), (signer_b.clone(), None)][..],
+            &[(signer_a.clone(), Some(&userid1)), (signer_b.clone(), Some(&userid2))][..],
+
+            // Same signer, different (or no) signer user ID.
+            &[(signer_a.clone(), None), (signer_a.clone(), Some(&userid1))][..],
+            &[(signer_a.clone(), Some(&userid1)), (signer_a.clone(), None)][..],
+            &[(signer_a.clone(), Some(&userid1)), (signer_a.clone(), Some(&userid2))][..],
+        ] {
+            eprintln!("\n--------------------------------");
+            eprintln!("Signing message with {} signers", signers.len());
+
+            let mut sink = Vec::new();
+            let message = Message::new(&mut sink);
+
+            let mut message = Signer::with_userid(
+                message,
+                signers[0].0.clone(),
+                signers[0].1.map(|u| u.clone()))?;
+            eprintln!("Adding {}, {:?}",
+                      signers[0].0.public().fingerprint(), signers[0].1);
+            for (signer, userid) in signers.iter().skip(1) {
+                message = message.add_signer_with_userid(
+                    signer.clone(),
+                    userid.map(|u| u.clone()))?;
+                eprintln!("Adding {}, {:?}",
+                          signer.public().fingerprint(), userid);
+            }
+
+            let message = message.build()?;
+            let mut message = LiteralWriter::new(message).build()?;
+            message.write_all(b"Make it so, number one!")?;
+            message.finalize()?;
+
+            let pp = crate::PacketPile::from_bytes(&sink)?;
+            // We expect a literal packet and an OPS and a Signature
+            // packet for each signer.
+            let packets = signers.len() * 2 + 1;
+            assert_eq!(pp.children().count(), packets);
+            assert!(matches!(pp.path_ref(&[packets / 2]).unwrap(),
+                             Packet::Literal(_)));
+
+            for (i, (signer, userid)) in signers.iter().enumerate() {
+                if let Packet::Signature(sig)
+                    = pp.path_ref(&[packets - 1 - i]).unwrap()
+                {
+                    let issuers = sig.get_issuers();
+                    let signers_userid
+                        = sig.signers_user_id().map(|u| UserID::from(u));
+
+                    eprintln!("Signature #{}:\nissuers: {:?}\nsigner user ID: {:?}",
+                              i + 1, issuers, signers_userid);
+
+                    for issuer in issuers {
+                        assert!(signer.public().key_handle().aliases(issuer));
+                    }
+
+                    assert_eq!(userid, &signers_userid.as_ref());
+                } else {
+                    panic!("expected signature packet")
+                }
+            }
+        }
+
         Ok(())
     }
 }
