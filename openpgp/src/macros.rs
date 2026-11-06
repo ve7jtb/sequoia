@@ -91,7 +91,7 @@ macro_rules! time_it {
         }
         impl Drop for Timer {
             fn drop(&mut self) {
-                let elapsed = self.start.elapsed();
+                let elapsed = crate::now().duration_since(self.start);
                 if elapsed.clone().unwrap_or(Duration::from_millis($ms_threshold))
                     >= Duration::from_millis($ms_threshold)
                 {
@@ -103,7 +103,7 @@ macro_rules! time_it {
             }
         }
 
-        let _start = Timer { start: SystemTime::now(), label: String::from($label), };
+        let _start = Timer { start: crate::now(), label: String::from($label), };
         $body
     }};
     ( $label:expr, $body:expr ) => {
