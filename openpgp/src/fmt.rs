@@ -313,7 +313,7 @@ pub(crate) fn time(t: &std::time::SystemTime) -> String {
         unsafe {
             let mut tm: libc::tm = std::mem::zeroed();
 
-            #[cfg(unix)]
+            #[cfg(not(windows))]
             libc::gmtime_r(&t, &mut tm);
             #[cfg(windows)]
             libc::gmtime_s(&mut tm, &t);
