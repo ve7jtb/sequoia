@@ -51,6 +51,10 @@
 #![doc(html_logo_url = "https://docs.sequoia-pgp.org/logo.svg")]
 #![warn(missing_docs)]
 
+#[cfg(all(test, target_arch = "wasm32", target_os = "unknown"))]
+#[macro_use(test)]
+extern crate wasm_bindgen_test;
+
 // Public re-exports.
 //
 // We should provide public re-exports for any crate defining types
