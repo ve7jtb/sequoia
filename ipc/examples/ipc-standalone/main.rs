@@ -35,7 +35,7 @@ impl Hello {
 impl ipc::Handler for Hello {
     fn handle(
         &self,
-        network: twoparty::VatNetwork<tokio_util::compat::Compat<tokio::net::tcp::OwnedReadHalf>>,
+        network: twoparty::VatNetwork<ipc::Reader>,
     ) -> RpcSystem<Side> {
         RpcSystem::new(Box::new(network), Some(self.c.clone().client))
     }
@@ -67,6 +67,14 @@ enum Ephemeral {
     False,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+enum Transport {
+    /// Unix domain sockets on Unix, TCP elsewhere.
+    Native,
+    /// TCP with cookie authentication.
+    Tcp,
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -88,6 +96,9 @@ struct Args {
 
     #[clap(long, help = "Whether to run as client")]
     pub client: bool,
+
+    #[clap(long, value_enum, help = "The IPC transport to use")]
+    pub transport: Option<Transport>,
 }
 
 fn main() -> Result<()> {
@@ -100,6 +111,14 @@ fn main() -> Result<()> {
     if let Some(Ephemeral::True) = args.ephemeral {
         config.set_ephemeral();
     }
+
+    match args.transport {
+        Some(Transport::Native) =>
+            config.set_ipc_transport(ipc::IPCTransport::Native),
+        Some(Transport::Tcp) =>
+            config.set_ipc_transport(ipc::IPCTransport::Tcp),
+        None => ipc::IPCTransport::default(),
+    };
 
     let c = config.build()?;
 
