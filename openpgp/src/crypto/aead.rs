@@ -1247,92 +1247,109 @@ mod tests {
         let session_key = SessionKey::from(session_key);
         let aad = b"foobar";
 
-        let nonce = [0; 15];
+        for nonce_len in [12, 15] {
+            let nonce = vec![0; nonce_len];
 
-        let schedule = UnchunkedSchedule {
-            sk: session_key.clone(),
-            nonce: nonce.to_vec(),
-            aad: aad.to_vec(),
-        };
-
-        // Encrypt.
-        let mut ciphertext = Vec::new();
-        {
-            let mut encryptor = Encryptor::new(
-                sym_algo,
-                aead,
-                0,
-                schedule.clone(),
-                &mut ciphertext)
-                .expect("can encrypt");
-
-            encryptor.write_all(MESSAGE)
-                .expect("can encrypt");
-
-            encryptor.finalize()
-                .expect("can encrypt");
-        }
-        eprintln!("Ciphertext:\n{}",
-                  crate::fmt::hex::encode(&ciphertext));
-
-        #[cfg(feature = "crypto-rust")]
-        {
-            // Encrypt again using the same parameters, but use
-            // rust-crypto's interface.
-
-            use aes::Aes128;
-
-            use cipher::KeyInit;
-
-            use ocb3::Nonce;
-            use ocb3::Ocb3;
-            use ocb3::aead::Aead;
-            use ocb3::aead::Payload;
-
-            use typenum::U15;
-            use typenum::U16;
-
-            type Aes128Ocb3 = Ocb3<Aes128, U15, U16>;
-
-            let cipher = Aes128Ocb3::new(session_key.as_ref().into());
-            let nonce = Nonce::<U15>::from_slice(&nonce);
-
-            let payload = Payload {
-                msg: MESSAGE,
-                aad,
+            let schedule = UnchunkedSchedule {
+                sk: session_key.clone(),
+                nonce: nonce.clone(),
+                aad: aad.to_vec(),
             };
 
-            let ciphertext2 = cipher.encrypt(nonce, payload)
-                .expect("can encrypt");
+            // Encrypt.
+            let mut ciphertext = Vec::new();
+            {
+                let mut encryptor = Encryptor::new(
+                    sym_algo,
+                    aead,
+                    0,
+                    schedule.clone(),
+                    &mut ciphertext)
+                    .expect("can encrypt");
 
-            eprintln!("Ciphertext2:\n{}",
+                encryptor.write_all(MESSAGE)
+                    .expect("can encrypt");
+
+                encryptor.finalize()
+                    .expect("can encrypt");
+            }
+            eprintln!("Ciphertext:\n{}",
                       crate::fmt::hex::encode(&ciphertext));
 
-            assert_eq!(ciphertext, ciphertext2,
-                       "ciphertext should match");
-        }
+            #[cfg(any(feature = "crypto-rust", feature = "crypto-cng"))]
+            {
+                // Encrypt again using the same parameters, but use
+                // rust-crypto's interface.
 
-        // Decrypt.
-        {
-            let br = buffered_reader::Memory::with_cookie(
-                &ciphertext, Default::default());
+                use aes::Aes128;
 
-            let mut decryptor = Decryptor::new(
-                sym_algo,
-                aead,
-                0,
-                &schedule,
-                Box::new(br))
-                .expect("Can create decryptor");
+                use cipher::KeyInit;
 
-            let mut output = Vec::new();
-            decryptor.read_to_end(&mut output)
-                .expect("Can decrypt");
+                use ocb3::Nonce;
+                use ocb3::Ocb3;
+                use ocb3::aead::Aead;
+                use ocb3::aead::Payload;
 
-            assert_eq!(output, MESSAGE,
-                       "Decryption should return original message");
+                use typenum::U12;
+                use typenum::U15;
+                use typenum::U16;
 
-            eprintln!("Plaintext matches!");
+                let payload = Payload {
+                    msg: MESSAGE,
+                    aad,
+                };
+
+                let ciphertext2 = match nonce_len {
+                    12 => {
+                        type Aes128Ocb3 = Ocb3<Aes128, U12, U16>;
+
+                        let cipher = Aes128Ocb3::new(session_key.as_ref().into());
+                        let nonce = Nonce::<U12>::from_slice(&nonce);
+
+                        cipher.encrypt(nonce, payload)
+                            .expect("can encrypt")
+                    }
+                    15 => {
+                        type Aes128Ocb3 = Ocb3<Aes128, U15, U16>;
+
+                        let cipher = Aes128Ocb3::new(session_key.as_ref().into());
+                        let nonce = Nonce::<U15>::from_slice(&nonce);
+
+                        cipher.encrypt(nonce, payload)
+                            .expect("can encrypt")
+                    }
+                    _ => panic!("Unsupported nonce length ({}).", nonce_len),
+                };
+
+                eprintln!("Ciphertext2:\n{}",
+                          crate::fmt::hex::encode(&ciphertext));
+
+                assert_eq!(ciphertext, ciphertext2,
+                           "ciphertext should match");
+            }
+
+            // Decrypt.
+            {
+                let br = buffered_reader::Memory::with_cookie(
+                    &ciphertext, Default::default());
+
+                let mut decryptor = Decryptor::new(
+                    sym_algo,
+                    aead,
+                    0,
+                    &schedule,
+                    Box::new(br))
+                    .expect("Can create decryptor");
+
+                let mut output = Vec::new();
+                decryptor.read_to_end(&mut output)
+                    .expect("Can decrypt");
+
+                assert_eq!(output, MESSAGE,
+                           "Decryption should return original message");
+
+                eprintln!("Plaintext matches!");
+            }
         }
     }
 }
