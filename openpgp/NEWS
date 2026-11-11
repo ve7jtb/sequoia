@@ -9,6 +9,9 @@
    - serialize::stream::Signer::with_userid
    - serialize::stream::Signer::with_template_and_userid
    - serialize::stream::Signer::add_signer_with_userid
+   - Extend `crypto::aead::Decryptor` and `crypto::aead::Encryptor` to
+     work with unchunked data.
+   - `crypto::aead::UnchunkedSchedule`
 
 * Changes in 2.4.1
 ** Notable fixes

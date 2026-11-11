@@ -307,6 +307,10 @@ pub trait Schedule<T>: Send + Sync {
     /// with key, nonce, and AAD.
     ///
     /// `index` is the current chunk index.
+    ///
+    /// If the chunk size is 0 bytes, then the data is not chunked.
+    /// In this case, this function is called exactly once with
+    /// `index` equal to `0`.
     fn chunk(&self,
              index: u64,
              fun: &mut dyn FnMut(&SessionKey, &[u8], &[u8]) -> Result<T>)
@@ -325,6 +329,9 @@ pub trait Schedule<T>: Send + Sync {
     ///
     /// `index` is the current chunk index. `length` is the total
     /// length of the stream.
+    ///
+    /// If the chunk size is 0 bytes, then the data is not chunked.
+    /// In this case, this function is not called.
     fn finalizer(&self,
                  index: u64,
                  length: u64,
@@ -442,6 +449,93 @@ impl<T> Schedule<T> for SEIPv2Schedule {
     }
 }
 
+/// An AEAD scheduler for unchunked data.
+///
+/// OpenPGP only specifies the use of chunked AEAD data.  However,
+/// support for unchunked encryption and decryption may be useful to
+/// applications that deal with non-OpenPGP data.
+///
+/// To disable the use of chunking, set `chunk_size` parameter of
+/// [`Decryptor::new`] or [`Encryptor::new`], as appropriate, to `0`.
+#[derive(Clone)]
+pub struct UnchunkedSchedule {
+    sk: SessionKey,
+    nonce: Vec<u8>,
+    aad: Vec<u8>,
+}
+
+impl UnchunkedSchedule {
+    /// Creates a new schedule to encrypt or decrypt unchunked data.
+    pub fn new(sk: SessionKey,
+               nonce: Vec<u8>,
+               aad: Vec<u8>) -> Self
+    {
+        Self {
+            sk,
+            nonce,
+            aad,
+        }
+    }
+}
+
+impl Schedule<EncryptionContext> for UnchunkedSchedule {
+    fn chunk(
+        &self,
+        index: u64,
+        fun: &mut dyn FnMut(&SessionKey, &[u8], &[u8])
+                            -> Result<EncryptionContext>,
+    ) -> Result<EncryptionContext> {
+        if index != 0 {
+            return Err(Error::InvalidArgument(
+                "Unchunked AEAD scheduler used in a chunked context".into())
+                       .into());
+        }
+
+        fun(&self.sk, &self.nonce, &self.aad)
+    }
+
+    fn finalizer(
+        &self,
+        _index: u64,
+        _length: u64,
+        _fun: &mut dyn FnMut(&SessionKey, &[u8], &[u8])
+                             -> Result<EncryptionContext>,
+    ) -> Result<EncryptionContext> {
+        return Err(Error::InvalidArgument(
+            "Unchunked AEAD scheduler used in a chunked context".into())
+                   .into());
+    }
+}
+
+impl Schedule<DecryptionContext> for &UnchunkedSchedule {
+    fn chunk(
+        &self,
+        index: u64,
+        fun: &mut dyn FnMut(&SessionKey, &[u8], &[u8])
+                            -> Result<DecryptionContext>,
+    ) -> Result<DecryptionContext> {
+        if index != 0 {
+            return Err(Error::InvalidArgument(
+                "Unchunked AEAD scheduler used in a chunked context".into())
+                       .into());
+        }
+
+        fun(&self.sk, &self.nonce, &self.aad)
+    }
+
+    fn finalizer(
+        &self,
+        _index: u64,
+        _length: u64,
+        _fun: &mut dyn FnMut(&SessionKey, &[u8], &[u8])
+                             -> Result<DecryptionContext>,
+    ) -> Result<DecryptionContext> {
+        return Err(Error::InvalidArgument(
+            "Unchunked AEAD scheduler used in a chunked context".into())
+                   .into());
+    }
+}
+
 /// A `Read`er for decrypting AEAD-encrypted data.
 pub(crate) struct InternalDecryptor<'a, 's> {
     // The encrypted data.
@@ -505,7 +599,13 @@ impl<'a, 's> InternalDecryptor<'a, 's> {
             }
         }
 
-        // 2. Decrypt the data a chunk at a time until we've filled
+        // 2. Decryption.
+        //
+        // If chunk_size is 0, then chunking is disabled and we just
+        // read the whole input at once and verify a single tag.
+        //
+        // If chuck_size is not 0, then chunking is enabled and we
+        // decrypt the data a chunk at a time until we've filled
         // `plaintext`.
         //
         // Unfortunately, framing is hard.
@@ -536,25 +636,41 @@ impl<'a, 's> InternalDecryptor<'a, 's> {
         // there are at least a tag worth of bytes left over when we
         // read a chunk and a tag.
 
-        let n_chunks
-            = (plaintext.len() - pos + self.chunk_size - 1) / self.chunk_size;
-        let chunk_digest_size = self.chunk_size + self.digest_size;
-        let final_digest_size = self.digest_size;
+        // Whether we are chunking.
+        let chunking = self.chunk_size > 0;
+
+        let n_chunks;
+        let chunk_digest_size;
+        let final_digest_size;
+        if chunking {
+            n_chunks = (plaintext.len() - pos + self.chunk_size - 1) / self.chunk_size;
+            chunk_digest_size = self.chunk_size + self.digest_size;
+            final_digest_size = self.digest_size;
+        } else {
+            // Chunking is disabled.
+            n_chunks = 1;
+            chunk_digest_size = 0;
+            final_digest_size = 0;
+        }
 
         for _ in 0..n_chunks {
-            // Do a little dance to avoid exclusively locking
-            // `self.source`.
-            let to_read = chunk_digest_size + final_digest_size;
-            let result = {
+            let result = if chunking {
+                // Do a little dance to avoid exclusively locking
+                // `self.source`.
+                let to_read = chunk_digest_size + final_digest_size;
                 match self.source.data(to_read) {
-                    Ok(_) => Ok(self.source.buffer()),
+                    Ok(_) => Ok((to_read, self.source.buffer())),
                     Err(err) => Err(err),
                 }
+            } else {
+                // Chunk is disabled.  Read everything.
+                self.source.data_eof()
+                    .map(|input| (input.len(), input))
             };
 
             let check_final_tag;
             let chunk = match result {
-                Ok(chunk) => {
+                Ok((to_read, chunk)) => {
                     if chunk.is_empty() {
                         // Exhausted source.
                         return Ok(pos);
@@ -572,7 +688,9 @@ impl<'a, 's> InternalDecryptor<'a, 's> {
                 Err(e) => return Err(e.into()),
             };
 
-            assert!(chunk.len() <= chunk_digest_size);
+            if chunking {
+                assert!(chunk.len() <= chunk_digest_size);
+            }
 
             if chunk.is_empty() {
                 // There is nothing to decrypt: all that is left is
@@ -606,7 +724,10 @@ impl<'a, 's> InternalDecryptor<'a, 's> {
                 if double_buffer {
                     let to_copy = plaintext.len() - pos;
                     assert!(0 < to_copy);
-                    assert!(to_copy < self.chunk_size);
+                    if chunking {
+                        // Chunking is enabled.
+                        assert!(to_copy < self.chunk_size);
+                    }
 
                     plaintext[pos..pos + to_copy]
                         .copy_from_slice(&self.buffer[..to_copy]);
@@ -626,7 +747,7 @@ impl<'a, 's> InternalDecryptor<'a, 's> {
                 self.source.consume(chunk_len);
             }
 
-            if check_final_tag {
+            if chunking && check_final_tag {
                 // We read the whole ciphertext, now check the final digest.
                 let mut aead = self.schedule.finalizer(
                     self.chunk_index, self.bytes_decrypted,
@@ -841,7 +962,11 @@ impl<'s, W: io::Write> Encryptor<'s, W> {
             chunk_index: 0,
             bytes_encrypted: 0,
             buffer: Vec::with_capacity(chunk_size),
-            scratch: vec![0; chunk_size + aead.digest_size()?],
+            scratch: if chunk_size == 0 {
+                Vec::new()
+            } else {
+                vec![0; chunk_size + aead.digest_size()?]
+            },
         })
     }
 
@@ -853,54 +978,61 @@ impl<'s, W: io::Write> Encryptor<'s, W> {
         }
         let amount = buf.len();
 
-        // First, fill the buffer if there is something in it.
-        if !self.buffer.is_empty() {
-            let n = cmp::min(buf.len(), self.chunk_size - self.buffer.len());
-            self.buffer.extend_from_slice(&buf[..n]);
-            assert!(self.buffer.len() <= self.chunk_size);
-            buf = &buf[n..];
+        if self.chunk_size == 0 {
+            // Chunking is disabled.  Just buffer everything.
+            self.buffer.extend_from_slice(buf);
+        } else {
+            // First, fill the buffer if there is something in it.
+            if !self.buffer.is_empty() {
+                let n = cmp::min(buf.len(), self.chunk_size - self.buffer.len());
+                self.buffer.extend_from_slice(&buf[..n]);
+                if self.chunk_size > 0 {
+                    assert!(self.buffer.len() <= self.chunk_size);
+                }
+                buf = &buf[n..];
 
-            // And possibly encrypt the chunk.
-            if self.buffer.len() == self.chunk_size {
-                let mut aead =
-                    self.schedule.chunk(self.chunk_index, &mut |key, iv, ad| {
-                        self.aead.context(self.sym_algo, key, ad, iv)?
-                            .for_encryption()
-                    })?;
+                // And possibly encrypt the chunk.
+                if self.chunk_size > 0 && self.buffer.len() == self.chunk_size {
+                    let mut aead =
+                        self.schedule.chunk(self.chunk_index, &mut |key, iv, ad| {
+                            self.aead.context(self.sym_algo, key, ad, iv)?
+                                .for_encryption()
+                        })?;
 
-                let inner = self.inner.as_mut().unwrap();
+                    let inner = self.inner.as_mut().unwrap();
 
-                // Encrypt the chunk.
-                aead.encrypt_seal(&mut self.scratch, &self.buffer)?;
-                self.bytes_encrypted += self.chunk_size as u64;
-                self.chunk_index += 1;
-                // XXX: clear plaintext buffer.
-                crate::vec_truncate(&mut self.buffer, 0);
-                inner.write_all(&self.scratch)?;
+                    // Encrypt the chunk.
+                    aead.encrypt_seal(&mut self.scratch, &self.buffer)?;
+                    self.bytes_encrypted += self.chunk_size as u64;
+                    self.chunk_index += 1;
+                    // XXX: clear plaintext buffer.
+                    crate::vec_truncate(&mut self.buffer, 0);
+                    inner.write_all(&self.scratch)?;
+                }
             }
-        }
 
-        // Then, encrypt all whole chunks.
-        for chunk in buf.chunks(self.chunk_size) {
-            if chunk.len() == self.chunk_size {
-                // Complete chunk.
-                let mut aead =
-                    self.schedule.chunk(self.chunk_index, &mut |key, iv, ad| {
-                        self.aead.context(self.sym_algo, key, ad, iv)?
-                            .for_encryption()
-                    })?;
+            // Then, encrypt all whole chunks.
+            for chunk in buf.chunks(self.chunk_size) {
+                if chunk.len() == self.chunk_size {
+                    // Complete chunk.
+                    let mut aead =
+                        self.schedule.chunk(self.chunk_index, &mut |key, iv, ad| {
+                            self.aead.context(self.sym_algo, key, ad, iv)?
+                                .for_encryption()
+                        })?;
 
-                let inner = self.inner.as_mut().unwrap();
+                    let inner = self.inner.as_mut().unwrap();
 
-                // Encrypt the chunk.
-                aead.encrypt_seal(&mut self.scratch, chunk)?;
-                self.bytes_encrypted += self.chunk_size as u64;
-                self.chunk_index += 1;
-                inner.write_all(&self.scratch)?;
-            } else {
-                // Stash for later.
-                assert!(self.buffer.is_empty());
-                self.buffer.extend_from_slice(chunk);
+                    // Encrypt the chunk.
+                    aead.encrypt_seal(&mut self.scratch, chunk)?;
+                    self.bytes_encrypted += self.chunk_size as u64;
+                    self.chunk_index += 1;
+                    inner.write_all(&self.scratch)?;
+                } else {
+                    // Stash for later.
+                    assert!(self.buffer.is_empty());
+                    self.buffer.extend_from_slice(chunk);
+                }
             }
         }
 
@@ -929,11 +1061,16 @@ impl<'s, W: io::Write> Encryptor<'s, W> {
 
                 // Encrypt the chunk.
                 unsafe {
-                    // Safety: remaining data is less than the chunk
-                    // size.  The vector has capacity chunk size plus
-                    // digest size.
-                    debug_assert!(self.buffer.len() < self.chunk_size);
-                    self.scratch.set_len(self.buffer.len() + self.digest_size)
+                    if self.chunk_size > 0 {
+                        // Safety: remaining data is less than the chunk
+                        // size.  The vector has capacity chunk size plus
+                        // digest size.
+                        debug_assert!(self.buffer.len() < self.chunk_size);
+                        self.scratch.set_len(self.buffer.len() + self.digest_size);
+                    } else {
+                        self.scratch
+                            = vec![0; self.buffer.len() + self.digest_size];
+                    }
                 }
                 aead.encrypt_seal(&mut self.scratch, &self.buffer)?;
                 self.bytes_encrypted += self.buffer.len() as u64;
@@ -943,16 +1080,18 @@ impl<'s, W: io::Write> Encryptor<'s, W> {
                 inner.write_all(&self.scratch)?;
             }
 
-            // Write final digest.
-            let mut aead = self.schedule.finalizer(
-                self.chunk_index, self.bytes_encrypted,
-                &mut |key, iv, ad| {
-                    self.aead.context(self.sym_algo, key, ad, iv)?
-                        .for_encryption()
-                })?;
-            debug_assert!(self.digest_size <= self.scratch.len());
-            aead.encrypt_seal(&mut self.scratch[..self.digest_size], b"")?;
-            inner.write_all(&self.scratch[..self.digest_size])?;
+            if self.chunk_size > 0 {
+                // Write final digest.
+                let mut aead = self.schedule.finalizer(
+                    self.chunk_index, self.bytes_encrypted,
+                    &mut |key, iv, ad| {
+                        self.aead.context(self.sym_algo, key, ad, iv)?
+                            .for_encryption()
+                    })?;
+                debug_assert!(self.digest_size <= self.scratch.len());
+                aead.encrypt_seal(&mut self.scratch[..self.digest_size], b"")?;
+                inner.write_all(&self.scratch[..self.digest_size])?;
+            }
 
             Ok(inner)
         } else {
@@ -1083,6 +1222,117 @@ mod tests {
 
                 assert_eq!(&plaintext[..], crate::tests::manifesto());
             }
+        }
+    }
+
+    #[test]
+    fn unchunked() {
+        let sym_algo = SymmetricAlgorithm::AES128;
+        let aead = AEADAlgorithm::OCB;
+
+        use crate::crypto::backend::{Backend, interface::Aead};
+        if ! Backend::supports_algo_with_symmetric(aead, sym_algo) {
+            eprintln!("Backend does not support {} with {}",
+                      aead, sym_algo);
+            return;
+        }
+
+        // An AES-128 block is 16 bytes.  Encrypt a few blocks (but
+        // not a multiple of the block size to make this a bit more
+        // interesting).
+        const MESSAGE: &[u8] = b"0123456789012345678901234567890123456789\
+                                 0123456789012345678901234567890123456789";
+
+        let session_key = vec![0; sym_algo.key_size().expect("know key size")];
+        let session_key = SessionKey::from(session_key);
+        let aad = b"foobar";
+
+        let nonce = [0; 15];
+
+        let schedule = UnchunkedSchedule {
+            sk: session_key.clone(),
+            nonce: nonce.to_vec(),
+            aad: aad.to_vec(),
+        };
+
+        // Encrypt.
+        let mut ciphertext = Vec::new();
+        {
+            let mut encryptor = Encryptor::new(
+                sym_algo,
+                aead,
+                0,
+                schedule.clone(),
+                &mut ciphertext)
+                .expect("can encrypt");
+
+            encryptor.write_all(MESSAGE)
+                .expect("can encrypt");
+
+            encryptor.finalize()
+                .expect("can encrypt");
+        }
+        eprintln!("Ciphertext:\n{}",
+                  crate::fmt::hex::encode(&ciphertext));
+
+        #[cfg(feature = "crypto-rust")]
+        {
+            // Encrypt again using the same parameters, but use
+            // rust-crypto's interface.
+
+            use aes::Aes128;
+
+            use cipher::KeyInit;
+
+            use ocb3::Nonce;
+            use ocb3::Ocb3;
+            use ocb3::aead::Aead;
+            use ocb3::aead::Payload;
+
+            use typenum::U15;
+            use typenum::U16;
+
+            type Aes128Ocb3 = Ocb3<Aes128, U15, U16>;
+
+            let cipher = Aes128Ocb3::new(session_key.as_ref().into());
+            let nonce = Nonce::<U15>::from_slice(&nonce);
+
+            let payload = Payload {
+                msg: MESSAGE,
+                aad,
+            };
+
+            let ciphertext2 = cipher.encrypt(nonce, payload)
+                .expect("can encrypt");
+
+            eprintln!("Ciphertext2:\n{}",
+                      crate::fmt::hex::encode(&ciphertext));
+
+            assert_eq!(ciphertext, ciphertext2,
+                       "ciphertext should match");
+        }
+
+        // Decrypt.
+        {
+            let br = buffered_reader::Memory::with_cookie(
+                &ciphertext, Default::default());
+
+            let mut decryptor = Decryptor::new(
+                sym_algo,
+                aead,
+                0,
+                &schedule,
+                Box::new(br))
+                .expect("Can create decryptor");
+
+            let mut output = Vec::new();
+            decryptor.read_to_end(&mut output)
+                .expect("Can decrypt");
+
+            assert_eq!(output, MESSAGE,
+                       "Decryption should return original message");
+
+            eprintln!("Plaintext matches!");
         }
     }
 }
