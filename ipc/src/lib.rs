@@ -12,12 +12,29 @@
 //!
 //! We use the filesystem as namespace to discover services.  Every
 //! service has a file called rendezvous point.  Access to this file
-//! is serialized using file locking.  This file contains a socket
-//! address and a cookie that we use to connect to the server and
-//! authenticate us.  If the file does not exist, is malformed, or
-//! does not point to a usable server, we start a new one on demand.
+//! is serialized using file locking.
 //!
-//! This design mimics Unix sockets, but works on Windows too.
+//! How clients connect to servers is controlled by the
+//! [`IPCTransport`].
+//!
+//! With [`IPCTransport::Native`] on Unix, the server listens on a
+//! Unix domain socket next to the rendezvous point, which has the
+//! same name but the extension `.sock`.  The socket is only
+//! accessible to its owner, and both ends check that the peer runs
+//! under the same user.  If nothing is listening on the socket, we
+//! start a new server on demand.
+//!
+//! With [`IPCTransport::Tcp`], which is currently the default, and
+//! always on Windows, the rendezvous point contains a TCP socket
+//! address and a cookie that we use to connect to the server and
+//! authenticate us.  If the file
+//! does not exist, is malformed, or does not point to a usable
+//! server, we start a new one on demand.  This design mimics Unix
+//! domain sockets.
+//!
+//! For security concerns, we never fall back from Unix domain sockets
+//! to TCP: if the selected transport cannot be used, connecting
+//! fails.
 //!
 //! # External vs internal servers
 //!
@@ -53,7 +70,9 @@ use capnp_rpc::rpc_twoparty_capnp::Side;
 pub use capnp_rpc as capnp_rpc;
 
 #[cfg(unix)]
-use std::os::unix::{io::{IntoRawFd, FromRawFd}, fs::OpenOptionsExt};
+use std::os::unix::{io::{FromRawFd, OwnedFd}, fs::OpenOptionsExt};
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(windows)]
 use std::os::windows::io::{AsRawSocket, IntoRawSocket, FromRawSocket};
 #[cfg(windows)]
@@ -73,17 +92,42 @@ mod keygrip;
 pub use self::keygrip::Keygrip;
 pub mod sexp;
 mod core;
-pub use crate::core::{Config, Context, IPCPolicy};
+#[cfg(unix)]
+mod unix;
+pub use crate::core::{Config, Context, IPCPolicy, IPCTransport};
 
 #[cfg(test)]
 mod tests;
+
+/// The read half of a connection.
+///
+/// This hides the transport (TCP or Unix domain socket) from
+/// [`Handler`]s.
+pub type Reader = tokio_util::compat::Compat<
+    Box<dyn tokio::io::AsyncRead + Unpin + Send>>;
 
 /// Servers need to implement this trait.
 pub trait Handler {
     /// Called on every connection.
     fn handle(&self,
-              network: capnp_rpc::twoparty::VatNetwork<tokio_util::compat::Compat<tokio::net::tcp::OwnedReadHalf>>)
+              network: capnp_rpc::twoparty::VatNetwork<Reader>)
               -> RpcSystem<Side>;
+}
+
+/// Wraps the two halves of a connection in a network.
+fn vat_network<R, W>(reader: R, writer: W, side: Side)
+                     -> twoparty::VatNetwork<Reader>
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    W: tokio::io::AsyncWrite + Unpin + 'static,
+{
+    use tokio_util::compat::TokioAsyncReadCompatExt;
+    use tokio_util::compat::TokioAsyncWriteCompatExt;
+
+    let reader: Box<dyn tokio::io::AsyncRead + Unpin + Send> =
+        Box::new(reader);
+    twoparty::VatNetwork::new(reader.compat(), writer.compat_write(),
+                              side, Default::default())
 }
 
 /// A factory for handlers.
@@ -157,29 +201,66 @@ impl Descriptor {
     /// [`Handle::enter`]: tokio::runtime::Handle::enter()
     pub fn connect_with_policy(&self, policy: core::IPCPolicy)
                    -> Result<RpcSystem<Side>> {
-        let do_connect = |cookie: Cookie, mut s: TcpStream| {
-            cookie.send(&mut s)?;
-
-            /* Tokioize.  */
-            s.set_nonblocking(true)?;
-            let stream = tokio::net::TcpStream::from_std(s)?;
-            stream.set_nodelay(true)?;
-
-            let (reader, writer) = stream.into_split();
-            use tokio_util::compat::TokioAsyncReadCompatExt;
-            use tokio_util::compat::TokioAsyncWriteCompatExt;
-            let (reader, writer) = (reader.compat(), writer.compat_write());
-
-            let network =
-                Box::new(twoparty::VatNetwork::new(reader, writer,
-                                                   Side::Client,
-                                                   Default::default()));
-
-            Ok(RpcSystem::new(network, None))
-        };
-
         fs::create_dir_all(self.ctx.home())?;
 
+        #[cfg(unix)]
+        if *self.ctx.ipc_transport() == core::IPCTransport::Native {
+            let path = unix::socket_path(&self.rendezvous)?;
+            return self.connect_unix(policy, &path);
+        }
+
+        self.connect_tcp(policy)
+    }
+
+    /// Connects to the server via a Unix domain socket, starting the
+    /// server if necessary.
+    #[cfg(unix)]
+    fn connect_unix(&self, policy: core::IPCPolicy, path: &Path)
+                    -> Result<RpcSystem<Side>> {
+        // A server is listening.
+        if let Ok(s) = UnixStream::connect(path) {
+            return unix_rpc_system(s);
+        }
+
+        let start_external = || -> Result<RpcSystem<Side>> {
+            // The lock is held until the server is listening.
+            let _lock = unix::lock(path)?;
+
+            // Another client may have started a server while we were
+            // waiting for the lock.
+            if let Ok(s) = UnixStream::connect(path) {
+                return unix_rpc_system(s);
+            }
+
+            let listener = unix::bind(path)?;
+            if let Err(err) = self.fork(Listener::Unix(listener)) {
+                let _ = fs::remove_file(path);
+                return Err(err);
+            }
+            unix_rpc_system(UnixStream::connect(path)?)
+        };
+        let start_internal = || -> Result<RpcSystem<Side>> {
+            // Internal servers are not discoverable by other
+            // processes, hence we don't bind to the well-known path.
+            let (listener, path, dir) = unix::bind_private()?;
+            self.spawn(Listener::Unix(listener))?;
+            let s = UnixStream::connect(&path)?;
+            drop(dir);
+            unix_rpc_system(s)
+        };
+
+        match policy {
+            core::IPCPolicy::Internal => start_internal(),
+            core::IPCPolicy::External => start_external(),
+            core::IPCPolicy::Robust => start_external()
+                .or_else(|_| start_internal()),
+        }
+    }
+
+    /// Connects to the server via TCP, starting the server if
+    /// necessary.
+    fn connect_tcp(&self, policy: core::IPCPolicy)
+                   -> Result<RpcSystem<Side>> {
         let mut file = CookieFile::open(&self.rendezvous)?;
 
         if let Some((cookie, rest)) = file.read()? {
@@ -188,7 +269,7 @@ impl Descriptor {
                 .and_then(|addr| TcpStream::connect(addr).map_err(drop));
 
             if let Ok(s) = stream {
-                do_connect(cookie, s)
+                tcp_rpc_system(cookie, s)
             } else {
                 /* Failed to connect.  Invalidate the cookie and try again.  */
                 file.clear()?;
@@ -214,7 +295,7 @@ impl Descriptor {
             }
             drop(file);
 
-            do_connect(cookie, TcpStream::connect(addr)?)
+            tcp_rpc_system(cookie, TcpStream::connect(addr)?)
         }
     }
 
@@ -228,16 +309,16 @@ impl Descriptor {
 
         /* Start the server, connect to it, and send the cookie.  */
         let join_handle: Option<JoinHandle<Result<()>>> = if external {
-            self.fork(listener)?;
+            self.fork(Listener::Tcp(listener))?;
             None
         } else {
-            Some(self.spawn(listener)?)
+            Some(self.spawn(Listener::Tcp(listener))?)
         };
 
         Ok((addr, external, join_handle))
     }
 
-    fn fork(&self, listener: TcpListener) -> Result<()> {
+    fn fork(&self, listener: Listener) -> Result<()> {
         let mut cmd = new_background_command(&self.executable);
         cmd
             .arg("--home")
@@ -252,10 +333,11 @@ impl Descriptor {
 
         platform! {
             unix => {
-                // Pass the listening TCP socket as child stdin.
-                cmd.stdin(unsafe { Stdio::from_raw_fd(listener.into_raw_fd()) });
+                // Pass the listening socket as child stdin.
+                cmd.stdin(Stdio::from(OwnedFd::from(listener)));
             },
             windows => {
+                let Listener::Tcp(listener) = listener;
                 // Sockets for `TcpListener` are not inheritable by default, so
                 // let's make them so, since we'll pass them to a child process.
                 unsafe {
@@ -280,7 +362,7 @@ impl Descriptor {
         Ok(())
     }
 
-    fn spawn(&self, l: TcpListener) -> Result<JoinHandle<Result<()>>> {
+    fn spawn(&self, l: Listener) -> Result<JoinHandle<Result<()>>> {
         let descriptor = self.clone();
         let join_handle = thread::spawn(move || -> Result<()> {
             Server::new(descriptor)
@@ -302,6 +384,12 @@ impl Descriptor {
     /// Normally, servers are started by clients on demand.  A client
     /// should never call this function.
     pub fn bootstrap(&mut self) -> Result<Option<JoinHandle<Result<()>>>> {
+        #[cfg(unix)]
+        if *self.ctx.ipc_transport() == core::IPCTransport::Native {
+            let path = unix::socket_path(&self.rendezvous)?;
+            return self.bootstrap_unix(&path);
+        }
+
         let mut file = CookieFile::open(&self.rendezvous)?;
 
         // Try to connect to the server.  If it is already running,
@@ -339,6 +427,64 @@ impl Descriptor {
 
         Ok(Some(join_handle))
     }
+
+    /// Like [`Descriptor::bootstrap`], but listens on a Unix domain
+    /// socket.
+    #[cfg(unix)]
+    fn bootstrap_unix(&mut self, path: &Path)
+                      -> Result<Option<JoinHandle<Result<()>>>> {
+        let _lock = unix::lock(path)?;
+
+        // Try to connect to the server.  If it is already running,
+        // we're done.
+        if UnixStream::connect(path).is_ok() {
+            return Ok(None);
+        }
+
+        // Start an *internal* server.
+        let listener = unix::bind(path)?;
+        Ok(Some(self.spawn(Listener::Unix(listener))?))
+    }
+}
+
+/// A listening socket.
+enum Listener {
+    /// A TCP socket.  Clients authenticate using a cookie.
+    Tcp(TcpListener),
+    /// A Unix domain socket.  Clients are authenticated using their
+    /// credentials.
+    #[cfg(unix)]
+    Unix(UnixListener),
+}
+
+/// Returns an RPC system for a connection to a TCP server.
+fn tcp_rpc_system(cookie: Cookie, mut s: TcpStream) -> Result<RpcSystem<Side>> {
+    cookie.send(&mut s)?;
+
+    /* Tokioize.  */
+    s.set_nonblocking(true)?;
+    let stream = tokio::net::TcpStream::from_std(s)?;
+    stream.set_nodelay(true)?;
+
+    let (reader, writer) = stream.into_split();
+    let network = vat_network(reader, writer, Side::Client);
+    Ok(RpcSystem::new(Box::new(network), None))
+}
+
+/// Returns an RPC system for a connection to a Unix domain socket
+/// server.
+#[cfg(unix)]
+fn unix_rpc_system(s: UnixStream) -> Result<RpcSystem<Side>> {
+    /* Tokioize.  */
+    s.set_nonblocking(true)?;
+    let stream = tokio::net::UnixStream::from_std(s)?;
+    if ! unix::peer_is_us(&stream) {
+        return Err(anyhow!("Server is running under a different user"));
+    }
+
+    let (reader, writer) = stream.into_split();
+    let network = vat_network(reader, writer, Side::Client);
+    Ok(RpcSystem::new(Box::new(network), None))
 }
 
 /// A server.
@@ -388,21 +534,64 @@ impl Server {
     ///
     /// External servers must call this early on.
     ///
-    /// On Linux expects 'stdin' to be a listening TCP socket.
+    /// On Unix this expects 'stdin' to be a listening socket.  The
+    /// socket may be a TCP socket or a Unix domain socket.
+    ///
     /// On Windows this expects `SOCKET` env var to be set to a listening socket
     /// of the Windows Sockets API `SOCKET` value.
     pub fn serve(&mut self) -> Result<()> {
         let listener = platform! {
-            unix => unsafe { TcpListener::from_raw_fd(0) },
+            unix => {
+                Listener::from_fd(unsafe { OwnedFd::from_raw_fd(0) })?
+            },
             windows => {
                 let socket = std::env::var("SOCKET")?.parse()?;
-                unsafe { TcpListener::from_raw_socket(socket) }
+                Listener::Tcp(unsafe { TcpListener::from_raw_socket(socket) })
             }
         };
         self.serve_listener(listener)
     }
 
-    fn serve_listener(&mut self, l: TcpListener) -> Result<()> {
+    fn serve_listener(&mut self, l: Listener) -> Result<()> {
+        match l {
+            Listener::Tcp(l) => self.serve_tcp(l),
+            #[cfg(unix)]
+            Listener::Unix(l) => self.serve_unix(l),
+        }
+    }
+
+    #[cfg(unix)]
+    fn serve_unix(&mut self, l: UnixListener) -> Result<()> {
+        // There is no cookie: the socket is only accessible to its
+        // owner, and we check the peer's credentials.
+
+        /* Tokioize.  */
+        let local = tokio::task::LocalSet::new();
+        let handler = (self.descriptor.factory)(self.descriptor.clone(), &local)?;
+
+        let server = async move {
+            l.set_nonblocking(true)?;
+            let socket = tokio::net::UnixListener::from_std(l)?;
+
+            loop {
+                let (socket, _) = socket.accept().await?;
+
+                if ! unix::peer_is_us(&socket) {
+                    continue;   // XXX: Log the error?
+                }
+
+                let (reader, writer) = socket.into_split();
+                let network = vat_network(reader, writer, Side::Server);
+
+                let rpc_system = handler.handle(network);
+                let _ = tokio::task::spawn_local(rpc_system).await;
+            }
+        };
+
+        local.block_on(&self.runtime, server)
+    }
+
+    fn serve_tcp(&mut self, l: TcpListener) -> Result<()> {
         // The protocol is:
         //
         // - The first client exclusively locks the cookie file.
@@ -454,14 +643,7 @@ impl Server {
                 }
 
                 let (reader, writer) = socket.into_split();
-
-                use tokio_util::compat::TokioAsyncReadCompatExt;
-                use tokio_util::compat::TokioAsyncWriteCompatExt;
-                let (reader, writer) = (reader.compat(), writer.compat_write());
-
-                let network =
-                    twoparty::VatNetwork::new(reader, writer,
-                                            Side::Server, Default::default());
+                let network = vat_network(reader, writer, Side::Server);
 
                 let rpc_system = handler.handle(network);
                 let _ = tokio::task::spawn_local(rpc_system).await;
