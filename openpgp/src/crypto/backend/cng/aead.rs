@@ -154,10 +154,21 @@ impl crate::crypto::backend::interface::Aead for super::Backend {
                 use ocb3::{Ocb3, Nonce};
                 match sym_algo {
                     SymmetricAlgorithm::AES128 => {
-                        let nonce = Nonce::try_from_slice(nonce)?;
-                        let cipher =
-                            Ocb3::<BlockCipherKey<Aes, U128>, U15>::new_from_slice(key)?;
-                        Ok(Box::new(Ocb { cipher, nonce: *nonce, aad: aad.to_vec() }))
+                        match nonce.len() {
+                            12 => {
+                                let nonce = Nonce::try_from_slice(nonce)?;
+                                let cipher = Ocb3::<BlockCipherKey<Aes, U128>, U12>::new_from_slice(key)?;
+                                Ok(Box::new(Ocb12 { cipher, nonce: *nonce, aad: aad.to_vec() }))
+                            }
+                            _ => {
+                                // The default is a 15 byte nonce.  If
+                                // `nonce` is not 15 bytes, this will
+                                // return an error.
+                                let nonce = Nonce::try_from_slice(nonce)?;
+                                let cipher = Ocb3::<BlockCipherKey<Aes, U128>, U15>::new_from_slice(key)?;
+                                Ok(Box::new(Ocb { cipher, nonce: *nonce, aad: aad.to_vec() }))
+                            }
+                        }
                     },
                     SymmetricAlgorithm::AES192 => {
                         let nonce = Nonce::try_from_slice(nonce)?;
@@ -289,57 +300,78 @@ macro_rules! impl_aead {
 
 impl_aead!(BlockCipherKey<Aes, U128>, BlockCipherKey<Aes, U192>, BlockCipherKey<Aes, U256>);
 
-struct Ocb<Cipher: BlockCipher + BlockSizeUser<BlockSize = U16> + BlockDecrypt + BlockEncrypt> {
-    cipher: ocb3::Ocb3<Cipher, U15>,
-    nonce: GenericArray<u8, U15>,
-    aad: Vec<u8>,
+// We can't be generic over the nonce size as Ocb3 requires the nonce
+// parameter to implement NonceSizes, which is sealed.
+macro_rules! ocb_impl {
+    ($Ocb:ident, $nonce_size:ty) => {
+        struct $Ocb<Cipher: BlockCipher + BlockSizeUser<BlockSize = U16> + BlockDecrypt + BlockEncrypt> {
+            cipher: ocb3::Ocb3<Cipher, $nonce_size>,
+            nonce: GenericArray<u8, $nonce_size>,
+            aad: Vec<u8>,
+        }
+
+        impl<Cipher> Context for $Ocb<Cipher>
+        where
+            Cipher: BlockCipher + BlockSizeUser<BlockSize = U16> + BlockDecrypt + BlockEncrypt,
+        {
+            fn digest_size(&self) -> usize {
+                TagLen::USIZE
+            }
+
+            fn encrypt_seal(&mut self, dst: &mut [u8], src: &[u8]) -> Result<()> {
+                debug_assert_eq!(dst.len(), src.len() + self.digest_size());
+                use ocb3::AeadInPlace;
+
+                let len = cmp::min(dst.len(), src.len());
+                dst[..len].copy_from_slice(&src[..len]);
+                let tag =
+                    self.cipher.encrypt_in_place_detached(&self.nonce, &self.aad,
+                                                          &mut dst[..len])?;
+                debug_assert_eq!(dst[len..].len(), tag.len());
+                let tag_len = cmp::min(dst[len..].len(), tag.len());
+                dst[len..len + tag_len].copy_from_slice(&tag[..tag_len]);
+                Ok(())
+            }
+
+            fn decrypt_verify(&mut self, dst: &mut [u8], src: &[u8]) -> Result<()> {
+                debug_assert_eq!(dst.len() + self.digest_size(), src.len());
+                use ocb3::AeadInPlace;
+
+                // Split src into ciphertext and digest.
+                let len = src.len().saturating_sub(self.digest_size());
+                let digest = &src[len..];
+                let src = &src[..len];
+
+                debug_assert_eq!(dst.len(), src.len());
+                let len = core::cmp::min(dst.len(), src.len());
+                dst[..len].copy_from_slice(&src[..len]);
+                self.cipher.decrypt_in_place_detached(&self.nonce, &self.aad, dst,
+                                                      digest.try_into()?)?;
+                Ok(())
+            }
+        }
+
+        impl<'a, Cipher> seal::Sealed for $Ocb<Cipher>
+        where
+            Cipher: BlockCipher + BlockSizeUser<BlockSize = U16> + BlockDecrypt + BlockEncrypt,
+        {}
+    }
 }
 
-impl<Cipher> Context for Ocb<Cipher>
-where
-    Cipher: BlockCipher + BlockSizeUser<BlockSize = U16> + BlockDecrypt + BlockEncrypt,
-{
-    fn digest_size(&self) -> usize {
-        TagLen::USIZE
-    }
+// OCB with 15-byte nonces.
+//
+// RFC 9580 specifies the use of OCB with 15-byte nonces.
+ocb_impl!(Ocb, U15);
 
-    fn encrypt_seal(&mut self, dst: &mut [u8], src: &[u8]) -> Result<()> {
-        debug_assert_eq!(dst.len(), src.len() + self.digest_size());
-        use ocb3::AeadInPlace;
-
-        let len = cmp::min(dst.len(), src.len());
-        dst[..len].copy_from_slice(&src[..len]);
-        let tag =
-            self.cipher.encrypt_in_place_detached(&self.nonce, &self.aad,
-                                                  &mut dst[..len])?;
-        debug_assert_eq!(dst[len..].len(), tag.len());
-        let tag_len = cmp::min(dst[len..].len(), tag.len());
-        dst[len..len + tag_len].copy_from_slice(&tag[..tag_len]);
-        Ok(())
-    }
-
-    fn decrypt_verify(&mut self, dst: &mut [u8], src: &[u8]) -> Result<()> {
-        debug_assert_eq!(dst.len() + self.digest_size(), src.len());
-        use ocb3::AeadInPlace;
-
-        // Split src into ciphertext and digest.
-        let len = src.len().saturating_sub(self.digest_size());
-        let digest = &src[len..];
-        let src = &src[..len];
-
-        debug_assert_eq!(dst.len(), src.len());
-        let len = core::cmp::min(dst.len(), src.len());
-        dst[..len].copy_from_slice(&src[..len]);
-        self.cipher.decrypt_in_place_detached(&self.nonce, &self.aad, dst,
-                                              digest.try_into()?)?;
-        Ok(())
-    }
-}
-
-impl<'a, Cipher> seal::Sealed for Ocb<Cipher>
-where
-    Cipher: BlockCipher + BlockSizeUser<BlockSize = U16> + BlockDecrypt + BlockEncrypt,
-{}
+// OCB with 12 byte nonces.
+//
+// We need this to decrypt password-protected keys encrypted using
+// GnuPG's `openpgp-s2k3-ocb-aes` scheme.  These are not normally
+// transferred over the wire, but are stored by GnuPG in the
+// `$GNUPGHOME/private-keys-v1.d` directory.  See:
+//
+// https://raw.githubusercontent.com/gpg/gnupg/refs/heads/master/doc/keyformat.txt
+ocb_impl!(Ocb12, U12);
 
 struct Gcm<Cipher: BlockCipher + BlockSizeUser<BlockSize = U16> + BlockEncrypt> {
     cipher: aes_gcm::AesGcm<Cipher, U12>,
