@@ -335,6 +335,7 @@ mod test {
     #[test]
     fn buffered_reader_generic_test() {
         // Test reading from a file.
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
         {
             use std::path::PathBuf;
             use std::fs::File;

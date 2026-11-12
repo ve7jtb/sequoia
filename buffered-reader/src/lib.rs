@@ -227,6 +227,10 @@
 #![doc(html_logo_url = "https://docs.sequoia-pgp.org/logo.svg")]
 #![warn(missing_docs)]
 
+#[cfg(all(test, target_arch = "wasm32", target_os = "unknown"))]
+#[macro_use(test)]
+extern crate wasm_bindgen_test;
+
 use std::io;
 use std::io::{Error, ErrorKind};
 use std::cmp;
@@ -1349,6 +1353,7 @@ mod test {
             buffered_reader_read_test_aux (bio, data);
         }
 
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
         {
             use std::path::PathBuf;
             use std::fs::File;

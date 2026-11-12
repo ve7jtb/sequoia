@@ -121,7 +121,7 @@ fn check_secret(v: &[u8]) {
                NEEDLE.len() * N0 as usize);
     std::hint::black_box(v); // Avoid optimizing away.
     unsafe {                 // Likewise.
-        assert_eq!(libc::memcmp(v.as_ptr() as *const _,
+        assert_eq!(memsec::memcmp(v.as_ptr() as *const _,
                                 NEEDLE.as_ptr() as *const _,
                                 NEEDLE.len()), 0);
     }
@@ -146,6 +146,7 @@ fn test_memzero() {
 
 /// A test case that allocates a Vector and securely overwrites it
 /// using [`libc::memset`].
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 fn test_libc_memset() {
     let mut v = careful_to_vec(NEEDLE);
     check_secret(&v);
@@ -305,6 +306,7 @@ fn main() {
         ("clean_basecase", clean_basecase as Test),
         ("leak_basecase", leak_basecase as Test),
         ("test_memzero", test_memzero as Test),
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
         ("test_libc_memset", test_libc_memset as Test),
         ("test_protected", test_protected as Test),
         ("test_protected_mpi", test_protected_mpi as Test),
