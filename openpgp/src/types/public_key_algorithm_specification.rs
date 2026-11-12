@@ -880,6 +880,8 @@ mod test {
         use PublicKeyAlgorithm::*;
         use Profile::*;
 
+        let _guard = crate::tests::rsa::real_generation();
+
         let check = |profile: Profile,
                      spec: PublicKeyAlgorithmSpecification,
                      algo: PublicKeyAlgorithm,
@@ -1030,6 +1032,8 @@ mod test {
     #[test]
     fn generate_key_for() {
         use Profile::*;
+
+        let _guard = crate::tests::rsa::real_generation();
 
         let algos = [
             (true, true, RFC4880, PublicKeyAlgorithmSpecification::rsa(2048)),

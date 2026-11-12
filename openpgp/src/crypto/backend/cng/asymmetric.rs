@@ -926,6 +926,10 @@ where
 
     /// Generates a new RSA key with a public modulus of size `bits`.
     pub fn generate_rsa(bits: usize) -> Result<Self> {
+        #[cfg(test)]
+        if let Some(key) = crate::tests::rsa::get(bits) {
+            return key;
+        }
         use win_crypto_ng::asymmetric::{AsymmetricKey, Rsa};
 
         let blob = AsymmetricKey::builder(Rsa)

@@ -1047,6 +1047,8 @@ mod tests {
     fn generate_roundtrip() {
         use crate::types::Curve::*;
 
+        let _guard = crate::tests::rsa::real_generation();
+
         let keys = vec![NistP256, NistP384, NistP521].into_iter().flat_map(|cv|
         {
             if ! cv.is_supported() {

@@ -1099,6 +1099,10 @@ where
 
     /// Generates a new RSA key with a public modulus of size `bits`.
     pub fn generate_rsa(bits: usize) -> Result<Self> {
+        #[cfg(test)]
+        if let Some(key) = crate::tests::rsa::get(bits) {
+            return key;
+        }
         let ctx = super::context();
 
         let e = 65537_i32.to_be_bytes();

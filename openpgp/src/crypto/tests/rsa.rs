@@ -32,6 +32,8 @@ fn p_less_than_q() -> Result<()> {
     use std::cmp::Ordering;
     use crate::crypto::raw_bigint_cmp;
 
+    let _guard = crate::tests::rsa::real_generation();
+
     // Repeat four times to increase the sensitivity.
     for _ in 0..4 {
         // Check that p < q holds when generating an RSA key.

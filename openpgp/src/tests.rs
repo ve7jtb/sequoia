@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 use crate::PublicKeyAlgorithm;
 
+pub mod rsa;
+
 pub struct Test {
     path: &'static str,
     pub bytes: &'static [u8],

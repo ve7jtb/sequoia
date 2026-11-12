@@ -1015,6 +1015,10 @@ impl<R> Key4<SecretParts, R>
 
     /// Generates a new RSA key with a public modulus of size `bits`.
     pub fn generate_rsa(bits: usize) -> Result<Self> {
+        #[cfg(test)]
+        if let Some(key) = crate::tests::rsa::get(bits) {
+            return key;
+        }
         let key = RsaPrivateKey::new(&mut rsa::rand_core::OsRng, bits)?;
         let (p, q) = match key.primes() {
             [p, q] => (p, q),
