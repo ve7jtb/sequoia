@@ -493,12 +493,15 @@ impl<R> Key4<SecretParts, R>
 
         let m = phi.divrem(&gcd)?.0;
 
-        let e = botan::MPI::modular_inverse(&d, &m)?;
+        // modular_inverse() requires d < m.
+        let d_reduced = d.divrem(&m)?.1;
+        let e = botan::MPI::modular_inverse(&d_reduced, &m)?;
 
         let secret = Privkey::load_rsa(&p.try_into()?, &q.try_into()?,
                                        &e.try_into()?)?;
 
-        let (public, secret) = rsa_rfc4880(secret)?;
+        // Botan recomputes d from p, q, and e, so preserve the supplied value.
+        let (public, secret) = rsa_rfc4880(secret, Some(d))?;
         Self::with_secret(
             ctime.into().unwrap_or_else(crate::now),
             PublicKeyAlgorithm::RSAEncryptSign,
@@ -510,7 +513,7 @@ impl<R> Key4<SecretParts, R>
         let mut rng = RandomNumberGenerator::new_userspace()?;
         let secret = Privkey::create("RSA", &format!("{}", bits), &mut rng)?;
 
-        let (public, secret) = rsa_rfc4880(secret)?;
+        let (public, secret) = rsa_rfc4880(secret, None)?;
         Self::with_secret(
             crate::now(),
             PublicKeyAlgorithm::RSAEncryptSign,
@@ -583,14 +586,17 @@ impl<R> Key4<SecretParts, R>
 
 /// Returns an RSA secret key in the format that OpenPGP
 /// expects.
-fn rsa_rfc4880(secret: Privkey) -> Result<(mpi::PublicKey,
-                                           mpi::SecretKeyMaterial)>
+fn rsa_rfc4880(secret: Privkey, d: Option<botan::MPI>)
+    -> Result<(mpi::PublicKey, mpi::SecretKeyMaterial)>
 {
     let public = secret.pubkey()?;
 
     let e = public.get_field("e")?;
     let n = public.get_field("n")?;
-    let d = secret.get_field("d")?;
+    let d = match d {
+        Some(d) => d,
+        None => secret.get_field("d")?,
+    };
     let p = secret.get_field("p")?;
     let q = secret.get_field("q")?;
 
