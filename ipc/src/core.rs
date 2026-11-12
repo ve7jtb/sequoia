@@ -55,6 +55,7 @@ pub struct Context {
     home: PathBuf,
     lib: PathBuf,
     ipc_policy: IPCPolicy,
+    ipc_transport: IPCTransport,
     ephemeral: bool,
     cleanup: bool,
 }
@@ -65,6 +66,7 @@ impl Clone for Context {
             home: self.home.clone(),
             lib: self.lib.clone(),
             ipc_policy: self.ipc_policy,
+            ipc_transport: self.ipc_transport,
             ephemeral: self.ephemeral,
             cleanup: false, // Prevent cleanup.
         }
@@ -103,6 +105,7 @@ impl Context {
             home: PathBuf::from(""), // Defer computation of default.
             lib: prefix().join("lib").join("sequoia"),
             ipc_policy: IPCPolicy::Robust,
+            ipc_transport: IPCTransport::Tcp,
             ephemeral: false,
             cleanup: false,
         })
@@ -121,6 +124,11 @@ impl Context {
     /// Returns the IPC policy.
     pub fn ipc_policy(&self) -> &IPCPolicy {
         &self.ipc_policy
+    }
+
+    /// Returns the IPC transport.
+    pub fn ipc_transport(&self) -> &IPCTransport {
+        &self.ipc_transport
     }
 
     /// Returns whether or not this is an ephemeral context.
@@ -222,6 +230,18 @@ impl Config {
         ::std::mem::replace(&mut self.0.ipc_policy, policy)
     }
 
+    /// Sets the IPC transport.
+    pub fn ipc_transport(mut self, transport: IPCTransport) -> Self {
+        self.set_ipc_transport(transport);
+        self
+    }
+
+    /// Sets the IPC transport and returns the old IPC transport.
+    pub fn set_ipc_transport(&mut self, transport: IPCTransport)
+                             -> IPCTransport {
+        ::std::mem::replace(&mut self.0.ipc_transport, transport)
+    }
+
     /// Makes this context ephemeral.
     pub fn ephemeral(mut self) -> Self {
         self.set_ephemeral();
@@ -287,6 +307,45 @@ pub enum IPCPolicy {
     /// your application.  If this is unacceptable in your
     /// environment, use the `External` policy.
     Robust,
+}
+
+/// IPC transport for Sequoia.
+///
+/// With this you can control how clients and servers communicate.
+/// Clients use it to connect to servers, and to select the kind of
+/// socket a server started on demand listens on.  Servers starting
+/// themselves using [`Descriptor::bootstrap`] use it to select the
+/// kind of socket to listen on.
+///
+/// The transport is never changed implicitly: if the selected
+/// transport cannot be used, connecting or bootstrapping fails.
+///
+/// The default is currently [`IPCTransport::Tcp`] for compatibility
+/// with clients and servers using older versions of this crate.  It
+/// will change to [`IPCTransport::Native`] in the future.
+///
+///   [`Descriptor::bootstrap`]: crate::Descriptor::bootstrap
+///   [`Server::serve`]: crate::Server::serve
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Default)]
+pub enum IPCTransport {
+    /// The platform's native transport.
+    ///
+    /// On Unix, this is a Unix domain socket next to the rendezvous
+    /// point.  The socket is only accessible to its owner, and both
+    /// ends check that the peer runs under the same user.
+    ///
+    /// On other platforms, this is the same as [`IPCTransport::Tcp`].
+    Native,
+
+    /// A TCP socket on the loopback interface.
+    ///
+    /// Clients authenticate using a cookie stored in the rendezvous
+    /// point.  Note that any local user can connect to the socket,
+    /// and attempt to authenticate.
+    ///
+    /// This is the default for now.
+    #[default]
+    Tcp,
 }
 
 impl<'a> From<&'a IPCPolicy> for u8 {
