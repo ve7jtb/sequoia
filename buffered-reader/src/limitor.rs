@@ -64,7 +64,7 @@ impl<T: BufferedReader<C>, C: fmt::Debug + Sync + Send> BufferedReader<C> for Li
     fn buffer(&self) -> &[u8] {
         let buf = self.reader.buffer();
         &buf[..cmp::min(buf.len(),
-                        cmp::min(std::usize::MAX as u64,
+                        cmp::min(usize::MAX as u64,
                                  self.limit) as usize)]
     }
 
