@@ -74,6 +74,7 @@ pub use self::keygrip::Keygrip;
 pub mod sexp;
 mod core;
 pub use crate::core::{Config, Context, IPCPolicy};
+mod subprocess;
 
 #[cfg(test)]
 mod tests;
@@ -276,7 +277,7 @@ impl Descriptor {
             }
         }
 
-        cmd.spawn()?;
+        subprocess::command_spawn(&mut cmd)?;
         Ok(())
     }
 
