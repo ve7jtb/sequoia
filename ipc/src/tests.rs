@@ -44,3 +44,49 @@ pub fn keybox(name: &str) -> &'static [u8] {
 pub fn message(name: &str) -> &'static [u8] {
     file(&format!("messages/{}", name))
 }
+
+struct NoopHandler;
+
+impl crate::Handler for NoopHandler {
+    fn handle(
+        &self,
+        network: capnp_rpc::twoparty::VatNetwork<
+            tokio_util::compat::Compat<tokio::net::tcp::OwnedReadHalf>,
+        >,
+    ) -> capnp_rpc::RpcSystem<capnp_rpc::rpc_twoparty_capnp::Side> {
+        capnp_rpc::RpcSystem::new(Box::new(network), None)
+    }
+}
+
+#[test]
+fn connect_missing_executable() -> crate::Result<()> {
+    let ctx = crate::Context::configure()
+        .ephemeral()
+        .build()?;
+    let desc = crate::Descriptor::new(
+        &ctx,
+        ctx.home().join("test.cookie"),
+        ctx.home().join("missing-ipc-server"),
+        |_desc, _local| Ok(Box::new(NoopHandler)),
+    );
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()?;
+
+    let err = match rt.block_on(async {
+        desc.connect_with_policy(crate::IPCPolicy::External)
+    }) {
+        Ok(_) => panic!("expected missing external server to fail"),
+        Err(err) => err,
+    };
+    let io_err = err.downcast_ref::<std::io::Error>()
+        .expect("expected std::io::Error");
+    assert_eq!(io_err.kind(), std::io::ErrorKind::NotFound);
+
+    rt.block_on(async {
+        desc.connect_with_policy(crate::IPCPolicy::Robust).map(drop)
+    })?;
+
+    Ok(())
+}
