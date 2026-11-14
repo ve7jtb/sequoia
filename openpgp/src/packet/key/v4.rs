@@ -1183,7 +1183,7 @@ mod tests {
             }
 
             let key: Key4<_, R>
-                = Key4::generate_rsa(bits)?;
+                = crate::tests::key4_rsa(bits)?;
             check(key)?;
         }
 
@@ -1218,7 +1218,7 @@ mod tests {
             }
 
             let key : Key4<_, key::UnspecifiedRole>
-                = Key4::generate_rsa(bits).unwrap();
+                = crate::tests::key4_rsa(bits).unwrap();
             let clone = key.clone();
             assert_eq!(key, clone);
         }
@@ -1289,7 +1289,7 @@ mod tests {
             .filter_map(|cv| {
                 Key4::generate_ecc(false, cv).ok()
             }).chain(vec![1024, 2048, 3072, 4096].into_iter().filter_map(|b| {
-                Key4::generate_rsa(b).ok()
+                crate::tests::key4_rsa(b).ok()
             })).chain(vec![1024, 2048, 3072, 4096].into_iter().filter_map(|b| {
                 Key4::generate_elgamal(b).ok()
             })).chain(
@@ -1327,7 +1327,7 @@ mod tests {
             .filter_map(|cv| -> Option<Key<key::SecretParts, key::PrimaryRole>> {
                 Key4::generate_ecc(false, cv).map(Into::into).ok()
             }).chain(vec![1024, 2048, 3072, 4096].into_iter().filter_map(|b| {
-                Key4::generate_rsa(b).map(Into::into).ok()
+                crate::tests::key4_rsa(b).map(Into::into).ok()
             }));
 
         for key in keys {
@@ -1611,7 +1611,7 @@ FwPoSAbbsLkNS/iNN2MDGAVYvezYn2QZ
 
         if PublicKeyAlgorithm::RSAEncryptSign.is_supported() {
             let rsa2k: Key<SecretParts, UnspecifiedRole> =
-                Key4::generate_rsa(2048)?.into();
+                crate::tests::key4_rsa(2048)?.into();
             assert!(matches!(
                 rsa2k.encrypt(&sk).unwrap_err().downcast().unwrap(),
                 crate::Error::InvalidArgument(_)

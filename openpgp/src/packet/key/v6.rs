@@ -1002,7 +1002,7 @@ mod tests {
             }
 
             let key: Key6<_, R>
-                = Key6::generate_rsa(bits)?;
+                = crate::tests::key6_rsa(bits)?;
             check(key)?;
         }
 
@@ -1037,7 +1037,7 @@ mod tests {
             }
 
             let key : Key6<_, key::UnspecifiedRole>
-                = Key6::generate_rsa(bits).unwrap();
+                = crate::tests::key6_rsa(bits).unwrap();
             let clone = key.clone();
             assert_eq!(key, clone);
         }
@@ -1108,7 +1108,7 @@ mod tests {
             .filter_map(|cv| {
                 Key6::generate_ecc(false, cv).ok()
             }).chain(vec![1024, 2048, 3072, 4096].into_iter().filter_map(|b| {
-                Key6::generate_rsa(b).ok()
+                crate::tests::key6_rsa(b).ok()
             })).chain([
                 (PublicKeyAlgorithm::MLKEM768_X25519, Key6::generate_mlkem768_x25519 as fn() -> Result<_>),
                 (PublicKeyAlgorithm::MLKEM1024_X448, Key6::generate_mlkem1024_x448),
@@ -1145,7 +1145,7 @@ mod tests {
             .filter_map(|cv| {
                 Key6::generate_ecc(true, cv).ok()
             }).chain(vec![1024, 2048, 3072, 4096].into_iter().filter_map(|b| {
-                Key6::generate_rsa(b).ok()
+                crate::tests::key6_rsa(b).ok()
             })).chain([
                 (PublicKeyAlgorithm::MLDSA65_Ed25519, Key6::generate_mldsa65_ed25519 as fn() -> Result<_>),
                 (PublicKeyAlgorithm::MLDSA87_Ed448, Key6::generate_mldsa87_ed448),
@@ -1186,7 +1186,7 @@ mod tests {
             .filter_map(|cv| -> Option<Key<key::SecretParts, key::PrimaryRole>> {
                 Key6::generate_ecc(false, cv).map(Into::into).ok()
             }).chain(vec![1024, 2048, 3072, 4096].into_iter().filter_map(|b| {
-                Key6::generate_rsa(b).map(Into::into).ok()
+                crate::tests::key6_rsa(b).map(Into::into).ok()
             }));
 
         for key in keys {
@@ -1221,7 +1221,7 @@ mod tests {
 
         if PublicKeyAlgorithm::RSAEncryptSign.is_supported() {
             let rsa2k: Key<SecretParts, UnspecifiedRole> =
-                Key6::generate_rsa(2048)?.into();
+                crate::tests::key6_rsa(2048)?.into();
             assert!(matches!(
                 rsa2k.encrypt(&sk).unwrap_err().downcast().unwrap(),
                 crate::Error::InvalidArgument(_)

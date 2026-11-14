@@ -2584,16 +2584,18 @@ mod test {
         let p = &P::new();
 
         #[derive(Debug)]
-        struct NoRsa;
-        impl Policy for NoRsa {
+        struct NoP256;
+        impl Policy for NoP256 {
             fn key(&self, ka: &ValidErasedKeyAmalgamation<key::PublicParts>)
                    -> Result<()>
             {
-                use crate::types::PublicKeyAlgorithm::*;
+                use crate::crypto::mpi::PublicKey::{ECDH, ECDSA};
 
                 eprintln!("algo: {}", ka.key().pk_algo());
-                if ka.key().pk_algo() == RSAEncryptSign {
-                    Err(anyhow::anyhow!("RSA!"))
+                if matches!(ka.key().mpis(),
+                            ECDSA { curve: Curve::NistP256, .. }
+                            | ECDH { curve: Curve::NistP256, .. }) {
+                    Err(anyhow::anyhow!("P-256!"))
                 } else {
                     Ok(())
                 }
@@ -2615,22 +2617,22 @@ mod test {
                 Ok(())
             }
         }
-        let norsa = &NoRsa {};
+        let nop256 = &NoP256 {};
 
-        // Generate a certificate with an RSA primary and two RSA
+        // Generate a certificate with a P-256 primary and two P-256
         // subkeys.
         let (cert,_) = CertBuilder::new()
-            .set_cipher_suite(CipherSuite::RSA2k)
+            .set_cipher_suite(CipherSuite::P256)
             .add_signing_subkey()
             .add_signing_subkey()
             .generate()?;
         assert_eq!(cert.keys().with_policy(p, None).count(), 3);
-        assert_eq!(cert.keys().with_policy(norsa, None).count(), 0);
+        assert_eq!(cert.keys().with_policy(nop256, None).count(), 0);
         assert!(cert.primary_key().with_policy(p, None).is_ok());
-        assert!(cert.primary_key().with_policy(norsa, None).is_err());
+        assert!(cert.primary_key().with_policy(nop256, None).is_err());
 
-        // Generate a certificate with an ECC primary, an ECC subkey,
-        // and an RSA subkey.
+        // Generate a certificate with a Cv25519 primary, a Cv25519 subkey,
+        // and a P-256 subkey.
         let (cert,_) = CertBuilder::new()
             .set_cipher_suite(CipherSuite::Cv25519)
             .add_signing_subkey()
@@ -2638,7 +2640,7 @@ mod test {
 
         let pk = cert.primary_key().key().parts_as_secret()?;
         let subkey: key::SecretSubkey
-            = Key4::generate_rsa(2048)?.into();
+            = Key4::generate_ecc(false, Curve::NistP256)?.into();
         let binding = signature::SignatureBuilder::new(SignatureType::SubkeyBinding)
             .set_key_flags(KeyFlags::empty().set_transport_encryption())?
             .sign_subkey_binding(&mut pk.clone().into_keypair()?,
@@ -2648,14 +2650,14 @@ mod test {
             vec![ Packet::from(subkey), binding.into() ])?.0;
 
         assert_eq!(cert.keys().with_policy(p, None).count(), 3);
-        assert_eq!(cert.keys().with_policy(norsa, None).count(), 2);
+        assert_eq!(cert.keys().with_policy(nop256, None).count(), 2);
         assert!(cert.primary_key().with_policy(p, None).is_ok());
-        assert!(cert.primary_key().with_policy(norsa, None).is_ok());
+        assert!(cert.primary_key().with_policy(nop256, None).is_ok());
 
-        // Generate a certificate with an RSA primary, an RSA subkey,
-        // and an ECC subkey.
+        // Generate a certificate with a P-256 primary, a P-256 subkey,
+        // and a Cv25519 subkey.
         let (cert,_) = CertBuilder::new()
-            .set_cipher_suite(CipherSuite::RSA2k)
+            .set_cipher_suite(CipherSuite::P256)
             .add_signing_subkey()
             .generate()?;
 
@@ -2671,11 +2673,11 @@ mod test {
             vec![ Packet::from(subkey), binding.into() ])?.0;
 
         assert_eq!(cert.keys().with_policy(p, None).count(), 3);
-        assert_eq!(cert.keys().with_policy(norsa, None).count(), 0);
+        assert_eq!(cert.keys().with_policy(nop256, None).count(), 0);
         assert!(cert.primary_key().with_policy(p, None).is_ok());
-        assert!(cert.primary_key().with_policy(norsa, None).is_err());
+        assert!(cert.primary_key().with_policy(nop256, None).is_err());
 
-        // Generate a certificate with an ECC primary and two ECC
+        // Generate a certificate with a Cv25519 primary and two Cv25519
         // subkeys.
         let (cert,_) = CertBuilder::new()
             .set_cipher_suite(CipherSuite::Cv25519)
@@ -2683,9 +2685,9 @@ mod test {
             .add_signing_subkey()
             .generate()?;
         assert_eq!(cert.keys().with_policy(p, None).count(), 3);
-        assert_eq!(cert.keys().with_policy(norsa, None).count(), 3);
+        assert_eq!(cert.keys().with_policy(nop256, None).count(), 3);
         assert!(cert.primary_key().with_policy(p, None).is_ok());
-        assert!(cert.primary_key().with_policy(norsa, None).is_ok());
+        assert!(cert.primary_key().with_policy(nop256, None).is_ok());
 
         Ok(())
     }
@@ -2700,17 +2702,19 @@ mod test {
         let p = &P::new();
 
         #[derive(Debug)]
-        struct NoRsa;
-        impl Policy for NoRsa {
+        struct NoP256;
+        impl Policy for NoP256 {
             fn key(&self, ka: &ValidErasedKeyAmalgamation<key::PublicParts>)
                    -> Result<()>
             {
-                use crate::types::PublicKeyAlgorithm::*;
+                use crate::crypto::mpi::PublicKey::{ECDH, ECDSA};
 
                 eprintln!("algo: {} is {}",
                           ka.key().fingerprint(), ka.key().pk_algo());
-                if ka.key().pk_algo() == RSAEncryptSign {
-                    Err(anyhow::anyhow!("RSA!"))
+                if matches!(ka.key().mpis(),
+                            ECDSA { curve: Curve::NistP256, .. }
+                            | ECDH { curve: Curve::NistP256, .. }) {
+                    Err(anyhow::anyhow!("P-256!"))
                 } else {
                     Ok(())
                 }
@@ -2732,7 +2736,7 @@ mod test {
                 Ok(())
             }
         }
-        let norsa = &NoRsa {};
+        let nop256 = &NoP256 {};
 
         #[derive(PartialEq, Debug)]
         struct VHelper {
@@ -2827,9 +2831,9 @@ mod test {
         }
 
 
-        // A certificate with an ECC primary and an ECC signing
+        // A certificate with a Cv25519 primary and a Cv25519 signing
         // subkey.
-        eprintln!("Trying ECC primary, ECC sub:");
+        eprintln!("Trying Cv25519 primary, Cv25519 sub:");
         let (cert,_) = CertBuilder::new()
             .set_cipher_suite(CipherSuite::Cv25519)
             .add_subkey(KeyFlags::empty().set_signing(), None,
@@ -2837,46 +2841,46 @@ mod test {
             .generate()?;
 
         assert_eq!(cert.keys().with_policy(p, None).count(), 2);
-        assert_eq!(cert.keys().with_policy(norsa, None).count(), 2);
+        assert_eq!(cert.keys().with_policy(nop256, None).count(), 2);
         assert!(cert.primary_key().with_policy(p, None).is_ok());
-        assert!(cert.primary_key().with_policy(norsa, None).is_ok());
+        assert!(cert.primary_key().with_policy(nop256, None).is_ok());
 
         sign_and_verify(p, &cert, true);
-        sign_and_verify(norsa, &cert, true);
+        sign_and_verify(nop256, &cert, true);
 
-        // A certificate with an RSA primary and an RCC signing
+        // A certificate with a P-256 primary and a Cv25519 signing
         // subkey.
-        eprintln!("Trying RSA primary, ECC sub:");
+        eprintln!("Trying P-256 primary, Cv25519 sub:");
         let (cert,_) = CertBuilder::new()
-            .set_cipher_suite(CipherSuite::RSA2k)
+            .set_cipher_suite(CipherSuite::P256)
             .add_subkey(KeyFlags::empty().set_signing(), None,
                         CipherSuite::Cv25519)
             .generate()?;
 
         assert_eq!(cert.keys().with_policy(p, None).count(), 2);
-        assert_eq!(cert.keys().with_policy(norsa, None).count(), 0);
+        assert_eq!(cert.keys().with_policy(nop256, None).count(), 0);
         assert!(cert.primary_key().with_policy(p, None).is_ok());
-        assert!(cert.primary_key().with_policy(norsa, None).is_err());
+        assert!(cert.primary_key().with_policy(nop256, None).is_err());
 
         sign_and_verify(p, &cert, true);
-        sign_and_verify(norsa, &cert, false);
+        sign_and_verify(nop256, &cert, false);
 
-        // A certificate with an ECC primary and an RSA signing
+        // A certificate with a Cv25519 primary and a P-256 signing
         // subkey.
-        eprintln!("Trying ECC primary, RSA sub:");
+        eprintln!("Trying Cv25519 primary, P-256 sub:");
         let (cert,_) = CertBuilder::new()
             .set_cipher_suite(CipherSuite::Cv25519)
             .add_subkey(KeyFlags::empty().set_signing(), None,
-                        CipherSuite::RSA2k)
+                        CipherSuite::P256)
             .generate()?;
 
         assert_eq!(cert.keys().with_policy(p, None).count(), 2);
-        assert_eq!(cert.keys().with_policy(norsa, None).count(), 1);
+        assert_eq!(cert.keys().with_policy(nop256, None).count(), 1);
         assert!(cert.primary_key().with_policy(p, None).is_ok());
-        assert!(cert.primary_key().with_policy(norsa, None).is_ok());
+        assert!(cert.primary_key().with_policy(nop256, None).is_ok());
 
         sign_and_verify(p, &cert, true);
-        sign_and_verify(norsa, &cert, false);
+        sign_and_verify(nop256, &cert, false);
 
         Ok(())
     }

@@ -6,7 +6,10 @@
 use std::fmt;
 use std::collections::BTreeMap;
 
-use crate::PublicKeyAlgorithm;
+use crate::{Cert, PublicKeyAlgorithm, Result};
+use crate::packet::key;
+use crate::packet::key::{Key4, Key6};
+use crate::parse::Parse;
 
 pub struct Test {
     path: &'static str,
@@ -155,6 +158,25 @@ pub fn file(name: &str) -> &'static [u8] {
 /// Returns the content of the given file below `openpgp/tests/data/keys`.
 pub fn key(name: &str) -> &'static [u8] {
     file(&format!("keys/{}", name))
+}
+
+/// Returns a fixed v4 RSA key of the requested size.
+pub fn key4_rsa<R>(bits: usize) -> Result<Key4<key::SecretParts, R>>
+    where R: key::KeyRole,
+{
+    // Generated using the generate-rsa-test-key example.
+    let cert = Cert::from_bytes(key(&format!("rsa{}-private.pgp", bits)))?;
+    let key = cert.primary_key().key().parts_as_secret()?;
+    assert_eq!(key.mpis().bits(), Some(bits));
+    Key4::with_secret(crate::now(), key.pk_algo(),
+                      key.mpis().clone(), key.secret().clone())
+}
+
+/// Returns a fixed v6 RSA key of the requested size.
+pub fn key6_rsa<R>(bits: usize) -> Result<Key6<key::SecretParts, R>>
+    where R: key::KeyRole,
+{
+    key4_rsa(bits).map(Key6::from_common)
 }
 
 /// Returns the content of the given file below `openpgp/tests/data/messages`.
