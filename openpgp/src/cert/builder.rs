@@ -2096,14 +2096,14 @@ mod tests {
         assert_eq!(cert1.primary_key().key().pk_algo(), PublicKeyAlgorithm::EdDSA);
 
         let (cert2, _) = CertBuilder::new()
-            .set_cipher_suite(CipherSuite::RSA3k)
+            .set_cipher_suite(CipherSuite::P256)
             .add_userid("test2@example.com")
             .add_transport_encryption_subkey()
             .generate().unwrap();
         assert_eq!(cert2.primary_key().key().pk_algo(),
-                   PublicKeyAlgorithm::RSAEncryptSign);
+                   PublicKeyAlgorithm::ECDSA);
         assert_eq!(cert2.subkeys().next().unwrap().key().pk_algo(),
-                   PublicKeyAlgorithm::RSAEncryptSign);
+                   PublicKeyAlgorithm::ECDH);
     }
 
     #[test]
@@ -2713,7 +2713,7 @@ mod tests {
         let p = &P::new();
 
         // Try a few combinations.
-        let rsa = PublicKeyAlgorithmSpecification::rsa(4096);
+        let rsa = PublicKeyAlgorithmSpecification::rsa(2048);
         let nist_signing = PublicKeyAlgorithmSpecification::nistp256_for_signing();
         let ed25519 = PublicKeyAlgorithmSpecification::ed25519();
 

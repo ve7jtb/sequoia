@@ -10,6 +10,33 @@ include:
       extra_args: "-- --skip leak_tests"
       extra_features: ",sequoia-net/reqwest,sequoia-net/isahc"
 
+wasm:
+  stage: build
+  image: registry.sequoia-pgp.org/sequoia-pgp/build-docker-image/rust-stable:latest
+  # Start this job once the check job is successful; don't wait for everything
+  # in pre-check.
+  needs: ["check"]
+  extends: [.rust-template]
+  before_script:
+    - apt-get -y install npm
+    - rustup default stable
+    - rustc --version --verbose
+    - cargo --version
+    - rustup target add wasm32-unknown-unknown
+    - cargo install -f wasm-bindgen-cli --version $(cargo pkgid wasm-bindgen | cut -d"@" -f2)
+  script:
+    - cargo test --release --target wasm32-unknown-unknown -p buffered-reader -p sequoia-openpgp --no-default-features --lib --features sequoia-openpgp/crypto-rust,sequoia-openpgp/allow-experimental-crypto,sequoia-openpgp/allow-variable-time-crypto,sequoia-openpgp/compression
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+    CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+    CARGO_FLAGS: --color always
+    CARGO_INCREMENTAL: 0
+    RUST_BACKTRACE: full
+  after_script:
+    - !reference [.after_script, end]
+  rules:
+    - !reference [.default_rules, rules]
+
 fuzzing:
   image: registry.sequoia-pgp.org/sequoia-pgp/build-docker-image/trixie-prebuild
   stage: pre-check

@@ -2754,13 +2754,13 @@ mod tests {
     #[test]
     fn signature_roundtrip() {
         let gen_v4_rsa = |bits: usize| -> Key<key::SecretParts, key::PrimaryRole> {
-            Key4::generate_rsa(bits)
-                .expect("Can generate a v4 RSA key")
+            crate::tests::key4_rsa(bits)
+                .expect("Can import a v4 RSA key")
                 .into()
         };
         let gen_v6_rsa = |bits: usize| -> Key<_, _> {
-            Key6::generate_rsa(bits)
-                .expect("Can generate a v6 RSA key")
+            crate::tests::key6_rsa(bits)
+                .expect("Can import a v6 RSA key")
                 .into()
         };
         // Disabled: see below.
@@ -3028,11 +3028,11 @@ mod tests {
             }
 
             let key: Key4<_, R>
-                = Key4::generate_rsa(bits)?;
+                = crate::tests::key4_rsa(bits)?;
             check(key.into())?;
 
             let key: Key6<_, R>
-                = Key6::generate_rsa(bits)?;
+                = crate::tests::key6_rsa(bits)?;
             check(key.into())?;
         }
 
