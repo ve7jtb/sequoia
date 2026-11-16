@@ -64,6 +64,15 @@ impl<T: BufferedReader<C>, C: fmt::Debug + Sync + Send> Dup<T, C> {
     pub fn rewind(&mut self) {
         self.cursor = 0;
     }
+
+    /// Returns the inner reader.
+    ///
+    /// Unlike [`BufferedReader::into_inner`], which is only
+    /// implemented for `Box<Self>` and erases the type of the inner
+    /// reader, this returns the concrete type, without boxing it.
+    pub fn into_inner(self) -> T {
+        self.reader
+    }
 }
 
 impl<T: BufferedReader<C>, C: fmt::Debug + Sync + Send> io::Read for Dup<T, C> {
@@ -170,6 +179,18 @@ mod test {
         assert_eq!(consumed, reader.data(consumed + 1).unwrap().len());
 
         buffered_reader_test_data_check(&mut reader);
+    }
+
+    // Unlike the trait method, the inherent method returns the concrete
+    // type of the inner reader.
+    #[test]
+    fn into_inner_keeps_the_type() {
+        let data = crate::BUFFERED_READER_TEST_DATA;
+        let mut reader = Dup::new(Memory::new(data));
+        buffered_reader_test_data_check(&mut reader);
+
+        let mut inner: Memory<'_, ()> = reader.into_inner();
+        buffered_reader_test_data_check(&mut inner);
     }
 
     // Test that buffer() returns the same data as data().
