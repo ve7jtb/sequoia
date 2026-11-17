@@ -12,6 +12,7 @@
    - Extend `crypto::aead::Decryptor` and `crypto::aead::Encryptor` to
      work with unchunked data.
    - `crypto::aead::UnchunkedSchedule`
+   - `packet::signature::subpacket::SubpacketArea::retain`
 
 * Changes in 2.4.1
 ** Notable fixes
