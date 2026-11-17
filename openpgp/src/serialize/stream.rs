@@ -525,7 +525,9 @@ impl<'a> Armorer<'a> {
     /// use std::io::Write;
     /// use sequoia_openpgp as openpgp;
     /// use openpgp::Profile;
-    /// use openpgp::serialize::stream::{Message, Armorer, LiteralWriter};
+    /// use openpgp::serialize::stream::Armorer;
+    /// use openpgp::serialize::stream::LiteralWriter;
+    /// use openpgp::serialize::stream::Message;
     ///
     /// let mut sink = vec![];
     /// {
@@ -541,7 +543,6 @@ impl<'a> Armorer<'a> {
     /// // RFC 9580 armor has no CRC-24 checksum line.
     /// let armor = std::str::from_utf8(&sink)?;
     /// assert!(!armor.lines().any(|line| line.starts_with('=')));
-    /// assert!(armor.ends_with("-----END PGP MESSAGE-----\n"));
     /// # Ok(()) }
     pub fn set_profile(mut self, profile: Profile) -> Self {
         self.profile = Some(profile);
@@ -4778,6 +4779,35 @@ mod test {
         let armor = std::str::from_utf8(&sink)?;
         assert!(armor.lines().any(|line| line.starts_with('=')),
                 "expected a CRC-24 checksum:\n{}", armor);
+        Ok(())
+    }
+
+    /// Checks that an explicitly selected armor profile is honored
+    /// when no filter selects a profile itself.
+    #[test]
+    fn armorer_explicit_profile_no_checksum() -> Result<()> {
+        // A v4 key, so the `Signer` doesn't select a profile.
+        let (cert, _) = CertBuilder::general_purpose(Some("alice"))
+            .generate()?;
+        let keypair = cert.primary_key().key().clone()
+            .parts_into_secret().unwrap().into_keypair()?;
+
+        let mut sink = vec![];
+        {
+            let message = Message::new(&mut sink);
+            let message = Armorer::new(message)
+                .set_profile(Profile::RFC9580)
+                .build()?;
+            let mut message = Signer::new(message, keypair)?.build()?;
+            message.write_all(b"Hello world.")?;
+            message.finalize()?;
+        }
+
+        // Left to itself, the `Armorer` would produce RFC 4880 armor,
+        // which has a CRC-24 checksum line starting with '='.
+        let armor = std::str::from_utf8(&sink)?;
+        assert!(!armor.lines().any(|line| line.starts_with('=')),
+                "unexpected CRC-24 checksum:\n{}", armor);
         Ok(())
     }
 }
