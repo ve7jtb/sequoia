@@ -1144,6 +1144,54 @@ impl SubpacketArea {
         self.packets.retain(|sp| sp.tag() != tag);
     }
 
+    /// Retains only the subpackets specified by the predicate.
+    ///
+    /// In other words, removes all subpackets for which `keep`
+    /// returns `false`.  This is like [`Vec::retain`], but operates on
+    /// [subpackets] instead of elements of a vector.
+    ///
+    /// This is useful, for example, to restrict a template to a
+    /// known-good list of subpacket tags.
+    ///
+    /// [subpackets]: Subpacket
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sequoia_openpgp as openpgp;
+    /// # use openpgp::cert::prelude::*;
+    /// # use openpgp::packet::prelude::*;
+    /// use openpgp::packet::signature::subpacket::SubpacketTag;
+    /// # use openpgp::types::SignatureType;
+    ///
+    /// # fn main() -> openpgp::Result<()> {
+    /// # let (cert, _) = CertBuilder::new().generate()?;
+    /// # let key : &Key<_, _> = cert.primary_key().key();
+    /// # let mut signer = key.clone().parts_into_secret()?.into_keypair()?;
+    /// #
+    /// let mut sig = SignatureBuilder::new(SignatureType::Binary)
+    ///     .sign_message(&mut signer, b"Hello, world!")?;
+    ///
+    /// // Drop everything but the creation time and the issuer information.
+    /// sig.hashed_area_mut().retain(|sp| matches!(sp.tag(),
+    ///     SubpacketTag::SignatureCreationTime
+    ///     | SubpacketTag::Issuer
+    ///     | SubpacketTag::IssuerFingerprint));
+    ///
+    /// assert!(sig.hashed_area().iter().all(|sp| matches!(sp.tag(),
+    ///     SubpacketTag::SignatureCreationTime
+    ///     | SubpacketTag::Issuer
+    ///     | SubpacketTag::IssuerFingerprint)));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn retain<F>(&mut self, keep: F)
+        where F: FnMut(&Subpacket) -> bool
+    {
+        self.cache_invalidate();
+        self.packets.retain(keep);
+    }
+
     /// Removes all subpackets.
     pub fn clear(&mut self) {
         self.cache_invalidate();

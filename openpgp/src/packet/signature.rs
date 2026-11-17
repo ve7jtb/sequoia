@@ -4682,4 +4682,64 @@ mod test {
         assert_eq!(sig.signature_expiration_time(), Some(now - hour));
         Ok(())
     }
+
+    /// Checks that `SubpacketArea::retain` keeps the selected
+    /// subpackets and drops the rest.
+    #[test]
+    fn subpacket_area_retain() -> Result<()> {
+        use subpacket::SubpacketTag;
+
+        // This certificate was managed by different implementations,
+        // so it contains a variety of signatures.
+        let pp = crate::PacketPile::from_bytes(crate::tests::key("neal.pgp"))?;
+
+        let mut signatures = 0;
+        let mut retained_hashed = 0;
+        for packet in pp.descendants() {
+            let mut sig = if let Packet::Signature(sig) = packet {
+                sig.clone()
+            } else {
+                continue;
+            };
+            signatures += 1;
+
+            // Restrict the hashed area to the creation time.
+            let before = sig.hashed_area().iter()
+                .filter(|sp| sp.tag() == SubpacketTag::SignatureCreationTime)
+                .count();
+            sig.hashed_area_mut().retain(|sp| {
+                sp.tag() == SubpacketTag::SignatureCreationTime
+            });
+            assert_eq!(sig.hashed_area().iter().count(), before);
+            assert!(sig.hashed_area().iter().all(|sp| {
+                sp.tag() == SubpacketTag::SignatureCreationTime
+            }));
+            retained_hashed += before;
+
+            // Restrict the unhashed area to the issuer information.
+            let before = sig.unhashed_area().iter()
+                .filter(|sp| {
+                    matches!(sp.tag(),
+                             SubpacketTag::Issuer
+                             | SubpacketTag::IssuerFingerprint)
+                })
+                .count();
+            sig.unhashed_area_mut().retain(|sp| {
+                matches!(sp.tag(),
+                         SubpacketTag::Issuer
+                         | SubpacketTag::IssuerFingerprint)
+            });
+            assert_eq!(sig.unhashed_area().iter().count(), before);
+            assert!(sig.unhashed_area().iter().all(|sp| {
+                matches!(sp.tag(),
+                         SubpacketTag::Issuer
+                         | SubpacketTag::IssuerFingerprint)
+            }));
+        }
+
+        assert!(signatures > 0, "expected some signatures");
+        assert!(retained_hashed > 0, "expected some creation times");
+
+        Ok(())
+    }
 }
