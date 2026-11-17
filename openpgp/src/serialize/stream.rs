@@ -354,6 +354,7 @@ impl<'a> From<&'a mut (dyn io::Write + Send + Sync)> for Message<'a> {
 pub struct Armorer<'a> {
     kind: armor::Kind,
     headers: Vec<(String, String)>,
+    profile: Option<Profile>,
     inner: Message<'a>,
 }
 assert_send_and_sync!(Armorer<'_>);
@@ -399,6 +400,7 @@ impl<'a> Armorer<'a> {
         Self {
             kind: armor::Kind::Message,
             headers: Vec::with_capacity(0),
+            profile: None,
             inner,
         }
     }
@@ -500,6 +502,53 @@ impl<'a> Armorer<'a> {
         self
     }
 
+    /// Selects the version of OpenPGP to armor the data for.
+    ///
+    /// By default, the armor is compatible with RFC 4880, that is, it
+    /// includes a CRC-24 checksum.  RFC 9580 drops the checksum, so
+    /// armor generated for [`Profile::RFC9580`] omits it.
+    ///
+    /// Filters that are added above the `Armorer` may select a
+    /// profile themselves, for example a [`Signer`] given only v6
+    /// keys.  A profile selected here takes precedence over their
+    /// choice, which is useful when the output is consumed by an
+    /// implementation that only understands one version of the
+    /// standard.
+    ///
+    ///   [`Profile::RFC9580`]: crate::Profile::RFC9580
+    ///   [`Signer`]: Signer
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> sequoia_openpgp::Result<()> {
+    /// use std::io::Write;
+    /// use sequoia_openpgp as openpgp;
+    /// use openpgp::Profile;
+    /// use openpgp::serialize::stream::Armorer;
+    /// use openpgp::serialize::stream::LiteralWriter;
+    /// use openpgp::serialize::stream::Message;
+    ///
+    /// let mut sink = vec![];
+    /// {
+    ///     let message = Message::new(&mut sink);
+    ///     let message = Armorer::new(message)
+    ///         .set_profile(Profile::RFC9580)
+    ///         .build()?;
+    ///     let mut message = LiteralWriter::new(message).build()?;
+    ///     message.write_all(b"Hello world.")?;
+    ///     message.finalize()?;
+    /// }
+    ///
+    /// // RFC 9580 armor has no CRC-24 checksum line.
+    /// let armor = std::str::from_utf8(&sink)?;
+    /// assert!(!armor.lines().any(|line| line.starts_with('=')));
+    /// # Ok(()) }
+    pub fn set_profile(mut self, profile: Profile) -> Self {
+        self.profile = Some(profile);
+        self
+    }
+
     /// Builds the armor writer, returning the writer stack.
     ///
     /// # Examples
@@ -519,7 +568,7 @@ impl<'a> Armorer<'a> {
         let level = self.inner.as_ref().cookie_ref().level;
         let mut cookie = Cookie::new(level + 1);
         cookie.private = Private::Armorer {
-            set_profile: None,
+            set_profile: self.profile,
         };
 
         writer::Armorer::new(
@@ -537,6 +586,7 @@ impl<'a> fmt::Debug for Armorer<'a> {
             .field("inner", &self.inner)
             .field("kind", &self.kind)
             .field("headers", &self.headers)
+            .field("profile", &self.profile)
             .finish()
     }
 }
@@ -4698,6 +4748,66 @@ mod test {
             }
         }
 
+        Ok(())
+    }
+
+    /// Checks that an explicitly selected armor profile is not
+    /// overridden by the profile that the filters above the `Armorer`
+    /// select automatically.
+    #[test]
+    fn armorer_explicit_profile() -> Result<()> {
+        let (cert, _) = CertBuilder::general_purpose(Some("alice"))
+            .set_profile(Profile::RFC9580)?
+            .generate()?;
+        let keypair = cert.primary_key().key().clone()
+            .parts_into_secret().unwrap().into_keypair()?;
+
+        let mut sink = vec![];
+        {
+            let message = Message::new(&mut sink);
+            let message = Armorer::new(message)
+                .set_profile(Profile::RFC4880)
+                .build()?;
+            let mut message = Signer::new(message, keypair)?.build()?;
+            message.write_all(b"Hello world.")?;
+            message.finalize()?;
+        }
+
+        // The v6 key makes the `Signer` select RFC 9580 armor, which
+        // has no checksum, but we explicitly asked for RFC 4880 armor,
+        // which does.  The checksum is the line starting with '='.
+        let armor = std::str::from_utf8(&sink)?;
+        assert!(armor.lines().any(|line| line.starts_with('=')),
+                "expected a CRC-24 checksum:\n{}", armor);
+        Ok(())
+    }
+
+    /// Checks that an explicitly selected armor profile is honored
+    /// when no filter selects a profile itself.
+    #[test]
+    fn armorer_explicit_profile_no_checksum() -> Result<()> {
+        // A v4 key, so the `Signer` doesn't select a profile.
+        let (cert, _) = CertBuilder::general_purpose(Some("alice"))
+            .generate()?;
+        let keypair = cert.primary_key().key().clone()
+            .parts_into_secret().unwrap().into_keypair()?;
+
+        let mut sink = vec![];
+        {
+            let message = Message::new(&mut sink);
+            let message = Armorer::new(message)
+                .set_profile(Profile::RFC9580)
+                .build()?;
+            let mut message = Signer::new(message, keypair)?.build()?;
+            message.write_all(b"Hello world.")?;
+            message.finalize()?;
+        }
+
+        // Left to itself, the `Armorer` would produce RFC 4880 armor,
+        // which has a CRC-24 checksum line starting with '='.
+        let armor = std::str::from_utf8(&sink)?;
+        assert!(!armor.lines().any(|line| line.starts_with('=')),
+                "unexpected CRC-24 checksum:\n{}", armor);
         Ok(())
     }
 }
