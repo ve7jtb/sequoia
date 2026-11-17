@@ -6,6 +6,7 @@
 
 * Changes in 2.5.0
 ** New functionality
+   - serialize::stream::Armorer::set_profile
    - serialize::stream::Signer::with_userid
    - serialize::stream::Signer::with_template_and_userid
    - serialize::stream::Signer::add_signer_with_userid
