@@ -4682,4 +4682,42 @@ mod test {
         assert_eq!(sig.signature_expiration_time(), Some(now - hour));
         Ok(())
     }
+
+    /// Checks that `SubpacketArea::retain` keeps the selected
+    /// subpackets and drops the rest.
+    #[test]
+    fn subpacket_area_retain() -> Result<()> {
+        use subpacket::SubpacketTag;
+
+        let mut pp = crate::PacketPile::from_bytes(crate::tests::key(
+            "emmelie-dorothea-dina-samantha-awina-ed25519.pgp"))?;
+        assert_eq!(pp.children().count(), 5);
+
+        if let Some(Packet::Signature(sig)) = pp.path_ref_mut(&[4]) {
+            // Restrict the hashed area to the creation time.
+            sig.hashed_area_mut().retain(|sp| {
+                sp.tag() == SubpacketTag::SignatureCreationTime
+            });
+            assert_eq!(sig.hashed_area().iter().count(), 1);
+            assert_eq!(sig.hashed_area().iter().next().unwrap().tag(),
+                       SubpacketTag::SignatureCreationTime);
+
+            // Restrict the unhashed area to the issuer information.
+            sig.unhashed_area_mut().retain(|sp| {
+                matches!(sp.tag(),
+                         SubpacketTag::Issuer
+                         | SubpacketTag::IssuerFingerprint)
+            });
+            assert!(sig.unhashed_area().iter().count() > 0);
+            assert!(sig.unhashed_area().iter().all(|sp| {
+                matches!(sp.tag(),
+                         SubpacketTag::Issuer
+                         | SubpacketTag::IssuerFingerprint)
+            }));
+        } else {
+            panic!("expected a signature");
+        }
+
+        Ok(())
+    }
 }
