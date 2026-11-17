@@ -380,14 +380,17 @@ impl<'a> Armorer<'a, Cookie> {
     /// Walks up the writer stack, looking for the next Armorer.
     /// Configure it to use the given profile.
     ///
-    /// This function can only be called once.  Calling it repeatedly
-    /// does nothing.
+    /// The first profile wins.  Filters like `Signer` and
+    /// `Encryptor` select a profile automatically, but a profile that
+    /// the user selected explicitly must not be overridden by that.
     pub fn set_profile(stack: &mut (dyn Stackable<'a, Cookie> + Send + Sync),
                        profile: Profile)
     {
         map_mut(stack, |w| match &mut w.cookie_mut().private {
             super::Private::Armorer { set_profile, .. } => {
-                *set_profile = Some(profile);
+                if set_profile.is_none() {
+                    *set_profile = Some(profile);
+                }
                 Some(())
             },
             _ => None, // Keep looking.
