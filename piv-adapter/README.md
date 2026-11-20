@@ -10,6 +10,42 @@ The implementation has inline API and implementation comments describing the
 cryptographic inputs, packet boundaries, slot mapping, cleanup, and failure
 handling. It contains no provisioning or on-key write interface.
 
+## Use as a separate library
+
+This crate lives on the dedicated `development/yubikey6-piv` branch of
+[ve7jtb/sequoia](https://github.com/ve7jtb/sequoia/tree/development/yubikey6-piv).
+It is independent of the
+[gws + Sequoia Chat transport](https://github.com/ve7jtb/gws-sequoia-chat).
+Neither the adapter library nor its protocol needs a Google account, Chat,
+PQ Mail's Java classes, or PQ Mail's identity/credential store.
+
+An application outside this workspace can depend on the crate directly:
+
+```toml
+[dependencies]
+sequoia-pqmail-piv = { git = "https://github.com/ve7jtb/sequoia", branch = "development/yubikey6-piv" }
+```
+
+Pin a reviewed commit with `rev` instead of `branch` for reproducible builds.
+If the application also uses `sequoia-openpgp` types directly, select that
+package from the same Git revision with `default-features = false` and
+`features = ["crypto-openssl", "compression-deflate"]`, so Cargo does not
+create incompatible duplicate instances of Sequoia's public types.
+The crate is not yet published on crates.io.
+
+The generic `Backend` trait separates the four component operations from
+Sequoia packet handling. Use `Level3Signer<B>` and `Level3Decryptor<B>` with
+your own backend, or the supplied `process::Pkcs11Operation` implementation.
+The latter requires the Python PKCS#11 adapters, native helpers, OpenSSL
+provider and Yubico module at explicitly configured paths. Those files can
+be deployed separately; an installed PQ Mail GUI is not a runtime requirement.
+The Java/PQ Mail references below are only for the optional cross-implementation
+hardware test, not for using the Rust library.
+
+Stock `sq` does not discover this adapter automatically. A separate helper or
+Sequoia application must instantiate these interfaces. FIDO PRF storage and
+local-browser integration are future layers, not functionality of this crate.
+
 ## Supported profile
 
 | OpenPGP operation | Component | PIV slot |
