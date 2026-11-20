@@ -3567,6 +3567,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sequoia-pqmail-piv"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "rpassword",
+ "sequoia-openpgp",
+ "sha3 0.10.9",
+ "tempfile",
+ "zeroize",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"

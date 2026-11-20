@@ -1,6 +1,19 @@
 Sequoia PGP
 ===========
 
+PQ Mail YubiKey 6 PIV development branch
+---------------------------------------
+
+This fork's `development/yubikey6-piv` branch adds an experimental external-key
+adapter for Level 3 hybrid OpenPGP signing and decryption through
+[PQ Mail's PKCS#11 backend](https://github.com/ve7jtb/pq-mail).
+See [the adapter README](./piv-adapter/README.md) for the commented implementation,
+build instructions, eight software tests, and successful YubiKey hardware
+interoperability results. Existing keys and PIN/touch policies are preserved.
+
+The upstream project is [Sequoia PGP on GitLab](https://gitlab.com/sequoia-pgp/sequoia).
+This adapter is a local development contribution, not an upstream-endorsed API.
+
 Sequoia is an implementation of OpenPGP as defined by [RFC 9580] and
 [RFC 9980] as well as the deprecated OpenPGP as defined by [RFC 4880],
 and various related standards.
