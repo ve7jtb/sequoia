@@ -34,14 +34,14 @@ use std::{
 use zeroize::Zeroizing;
 
 /// Refuse ambiguity instead of selecting the first matching certificate key.
-/// Certification keys 86/87 and classical fallback keys 88/89 are excluded by
-/// requiring a bound hybrid signing subkey and a bound hybrid encryption key.
+/// Certification-only keys and classical fallback keys are excluded by flags
+/// and algorithms. The older combined certification/signing primary is allowed
+/// only if it is the sole valid hybrid signing key.
 fn selected(cert: &Cert) -> Result<(PublicKey, PublicKey)> {
     let p = StandardPolicy::new();
     ensure!(!cert.is_tsk(), "Supply a public-only certificate");
     let signing: Vec<_> = cert
         .keys()
-        .subkeys()
         .with_policy(&p, None)
         .alive()
         .revoked(false)
@@ -51,7 +51,6 @@ fn selected(cert: &Cert) -> Result<(PublicKey, PublicKey)> {
         .collect();
     let encryption: Vec<_> = cert
         .keys()
-        .subkeys()
         .with_policy(&p, None)
         .alive()
         .revoked(false)
@@ -61,7 +60,7 @@ fn selected(cert: &Cert) -> Result<(PublicKey, PublicKey)> {
         .collect();
     ensure!(
         signing.len() == 1 && encryption.len() == 1,
-        "Expected exactly one valid Level 3 hybrid signing and encryption subkey"
+        "Expected exactly one valid Level 3 hybrid signing and encryption key"
     );
     ensure!(
         signing[0].version() == 6 && encryption[0].version() == 6,

@@ -115,9 +115,22 @@ fn command(python: &Path, script: &Path) -> Command {
     c
 }
 
-impl Backend for Pkcs11Operation {
-    fn execute(&mut self, op: Operation, spki: &[u8], input: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+impl Pkcs11Operation {
+    /// The boolean is private and selected only by the two closed Backend
+    /// entry points below. No certificate-provided slot or environment override
+    /// can redirect a certification operation or an ordinary message signature.
+    fn execute_at(
+        &mut self,
+        op: Operation,
+        spki: &[u8],
+        input: &[u8],
+        certification: bool,
+    ) -> Result<Zeroizing<Vec<u8>>> {
         let result = (|| {
+            ensure!(
+                !matches!(op, Operation::Ed448 | Operation::X448),
+                "Software component requires companion backend"
+            );
             let pin = self
                 .pin
                 .as_ref()
@@ -135,7 +148,17 @@ impl Backend for Pkcs11Operation {
                 .env("HYBRID_MAIL_PIN_STDIN", "1")
                 .env("PKCS11_TRADITIONAL_SLOT", "84")
                 .env("PKCS11_KEM_SLOT", "9d")
-                .env("PKCS11_ECDH_SLOT", "85");
+                .env(
+                    "PKCS11_ECDH_SLOT",
+                    if op == Operation::P384 { "82" } else { "85" },
+                );
+            if certification {
+                ensure!(
+                    op == Operation::MlDsa87 && input.len() == 64,
+                    "Expected certification external μ"
+                );
+                cmd.env("PQMAIL_CERTIFICATION_SLOTS", "86,87");
+            }
             let mut child = cmd.spawn().context("Cannot start PKCS#11 adapter")?;
 
             // Drain both output pipes concurrently to avoid a stderr-full
@@ -229,7 +252,15 @@ impl Backend for Pkcs11Operation {
         }
         result
     }
+}
 
+impl Backend for Pkcs11Operation {
+    fn execute(&mut self, op: Operation, spki: &[u8], input: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+        self.execute_at(op, spki, input, false)
+    }
+    fn certify(&mut self, spki: &[u8], mu: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+        self.execute_at(Operation::MlDsa87, spki, mu, true)
+    }
     fn finish(&mut self) {
         self.pin.take();
     }
