@@ -22,6 +22,7 @@ use zeroize::Zeroizing;
 
 pub mod process;
 pub mod companion;
+pub mod level3_companion;
 pub mod restore;
 
 /// Only public key material is held by either adapter.

@@ -4,6 +4,7 @@
 use anyhow::{ensure, Result};
 use sequoia_pqmail_piv::{
     companion::{read_card_for_restore, Envelope, RestoreState},
+    level3_companion,
     process::{Config, Pkcs11Operation},
     restore::ObjectReader,
 };
@@ -36,7 +37,10 @@ fn save(
     out: &Path,
     encoded: &[u8],
     keys: &std::collections::BTreeMap<String, Vec<u8>>,
-    envelope: &Envelope,
+    serial: u32,
+    certificate: &[u8],
+    profile: &str,
+    anchors: Option<&[Vec<u8>; 2]>,
     reconstructed: bool,
 ) -> Result<()> {
     fs::create_dir(out)?;
@@ -57,11 +61,15 @@ fn save(
         for (slot, key) in keys {
             write(&format!("{slot}.der"), key)?;
         }
-        write("public.pgp", envelope.certificate_bytes())?;
+        write("public.pgp", certificate)?;
+        if let Some(anchors) = anchors {
+            write("signing.cer", &anchors[0])?;
+            write("encryption.cer", &anchors[1])?;
+        }
         write(
             "restore.json",
             &serde_json::to_vec_pretty(&serde_json::json!({
-                "serial":envelope.serial,"profile":"LEVEL5_COMPANION",
+                "serial":serial,"profile":profile,
                 "signatureVerified":true,"liveKeysMatched":true,
                 "certificateReconstructed":reconstructed,"trusted":false
             }))?,
@@ -98,6 +106,29 @@ fn main() -> Result<()> {
         None
     };
     let mut card = ObjectReader::connect(&PathBuf::from(&args[1]), serial)?;
+    // The discriminator is only a routing hint. The selected parser rereads
+    // and authenticates the complete envelope, every live slot and the serial.
+    // No profile probing causes a PIN prompt or substitutes a fallback key.
+    if level3_companion::is_level3_card(&mut card)? {
+        ensure!(
+            cache.is_none(),
+            "Level 3 full companion does not use a reconstruction cache"
+        );
+        let (encoded, keys, envelope) = level3_companion::read_card(&mut card)?;
+        drop(card);
+        save(
+            &out,
+            &encoded,
+            &keys,
+            envelope.serial,
+            envelope.certificate_bytes(),
+            "LEVEL3_POLYFILL",
+            Some(envelope.anchors()),
+            false,
+        )?;
+        println!("PASS Sequoia Level 3 companion restore: authenticated envelope, certificates and live 82/9c/9d/83 keys verified. Public/ciphertext only; trust unchanged.");
+        return Ok(());
+    }
     let (encoded, keys, state) = read_card_for_restore(&mut card)?;
     // PC/SC must release its card/session before the PKCS#11 child connects.
     drop(card);
@@ -133,7 +164,16 @@ fn main() -> Result<()> {
             }
         }
     };
-    save(&out, &encoded, &keys, &envelope, reconstructed)?;
+    save(
+        &out,
+        &encoded,
+        &keys,
+        envelope.serial,
+        envelope.certificate_bytes(),
+        "LEVEL5_COMPANION",
+        None,
+        reconstructed,
+    )?;
     println!("PASS Sequoia companion restore: authenticated envelope, certificate signatures and live 86/9c/9d/82 keys verified. Only public certificate/ciphertext saved; trust unchanged.");
     Ok(())
 }

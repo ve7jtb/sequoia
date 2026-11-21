@@ -66,6 +66,9 @@ impl Config {
 pub struct Pkcs11Operation {
     config: Config,
     pin: Option<Zeroizing<Vec<u8>>>,
+    // Explicit trusted construction selects the reverse-polyfill routing.
+    // It is never inferred from untrusted environment or certificate strings.
+    level3_polyfill: bool,
 }
 
 impl Pkcs11Operation {
@@ -80,7 +83,17 @@ impl Pkcs11Operation {
         Ok(Self {
             config,
             pin: Some(pin),
+            level3_polyfill: false,
         })
+    }
+
+    /// A Level 3 polyfill uses Ed25519 in 9c, X25519 in 9d and the
+    /// dedicated P-384 wrapping key in 83. Software PQ operations never reach
+    /// these subprocesses; the closed operation set below enforces that.
+    pub fn new_level3_polyfill(config: Config, pin: Zeroizing<Vec<u8>>) -> Result<Self> {
+        let mut operation = Self::new(config, pin)?;
+        operation.level3_polyfill = true;
+        Ok(operation)
     }
 
     /// Useful to callers/tests without exposing any credential bytes.
@@ -152,6 +165,19 @@ impl Pkcs11Operation {
                     "PKCS11_ECDH_SLOT",
                     if op == Operation::P384 { "82" } else { "85" },
                 );
+            if self.level3_polyfill {
+                ensure!(
+                    !certification
+                        && matches!(op, Operation::Ed25519 | Operation::X25519 | Operation::P384),
+                    "Operation outside Level 3 polyfill hardware profile"
+                );
+                cmd.env("PQMAIL_LEVEL3_POLYFILL", "1")
+                    .env("PKCS11_TRADITIONAL_SLOT", "9c")
+                    .env(
+                        "PKCS11_ECDH_SLOT",
+                        if op == Operation::P384 { "83" } else { "9d" },
+                    );
+            }
             if certification {
                 ensure!(
                     op == Operation::MlDsa87 && input.len() == 64,

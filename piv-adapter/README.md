@@ -46,6 +46,93 @@ Stock `sq` does not discover this adapter automatically. A separate helper or
 Sequoia application must instantiate these interfaces. FIDO PRF storage and
 local-browser integration are future layers, not functionality of this crate.
 
+## Level 3 software-PQ companion on a classical PIV card
+
+The `level3_companion` module supports a separate, explicit profile for a card
+that provides Ed25519, X25519 and P-384 but cannot perform ML-DSA or ML-KEM.
+It uses the same RFC 9980 v6 message algorithms as the hardware Level 3 profile:
+ML-DSA-65 + Ed25519 signatures and ML-KEM-768 + X25519 encryption. A separate
+hybrid certification primary binds the message-signing and encryption subkeys.
+
+| Role | Hardware slot | Required policy |
+| --- | --- | --- |
+| Ed25519 certification component | `82` | PIN and touch |
+| Ed25519 message-signing component | `9c` | PIN and touch |
+| X25519 message-decryption component | `9d` | PIN and touch |
+| Dedicated P-384 companion wrapping key | `83` | PIN, no touch |
+| Independent ML-DSA-65 certification and signing seeds, ML-KEM-768 seed | Encrypted companion | Software only after unwrap |
+
+This is **hybrid message protection with classical protection of the software
+PQ keys at rest**. P-384 ECDH in `83`, HKDF-SHA-256 and AES-256-GCM protect an
+empty-password, seed-only PKCS#12 container. The software seeds are never sent
+to PKCS#11. The companion backend imports them directly into OpenSSL in memory;
+it does not create plaintext PKCS#12 or private-key files, save a password, or
+reuse private material across message operations. Process memory, swap and
+host compromise remain different risks from keeping all private components
+inside hardware. The profile does not claim Level 3 hardware storage security.
+
+`PQMCP003` authenticates the serial, all four live public keys, a fixed role
+manifest, the complete v6 certificate and two OpenPGP-only X.509 catalog
+carriers. Both certification signature components are verified before unwrap.
+After authenticated decryption, each seed must derive the exact public key
+bound by that certificate. Unknown roles, duplicate seed bags, noncanonical
+DER, altered slot mappings and malformed compressed streams are rejected.
+The X.509 carriers are identity metadata, **not S/MIME credentials**.
+
+The normal compressed envelope lives in the companion namespace (`5f5200`
+manifest, `5f5201` through `5f5220` chunks). This profile does not implement
+ultra-compact certificate regeneration. Restoring it needs no PIN and saves
+only public certificates and authenticated ciphertext; it does not grant
+contact trust. Each later signature or decryption requests one PIN, unwraps
+through no-touch `83`, then uses one touch-required classical message key.
+`finish` and failure discard the software keys and operation PIN.
+
+Build the two optional CLI tools with the same supported OpenSSL configuration
+used for the rest of the adapter:
+
+```sh
+cargo build --release --locked -p sequoia-pqmail-piv \
+  --bin piv-level3-companion-restore --bin piv-level3-companion-test
+```
+
+A read-only restore uses the native public-object helper:
+
+```sh
+piv-level3-companion-restore /absolute/path/to/object-helper SERIAL NEW_DIRECTORY
+```
+
+The generic `piv-companion-restore` entry point also recognizes this format and
+selects the same fully authenticated restore path. Format detection itself
+never authorizes a key or a PIN prompt. Existing full Level 5 and cached
+ultra-compact Level 5 restores retain their original behavior.
+
+The directory must not exist. It receives `companion.pqcomp`, `public.pgp`,
+`82.der`, `9c.der`, `9d.der`, `83.der`, the two public carrier certificates and
+`restore.json`. No private key or PIN is written. The `level3_companion::read_card`
+and `Envelope` APIs provide the equivalent integration points for another host.
+Construct `Pkcs11Operation::new_level3_polyfill` explicitly when supplying the
+hardware backend; ordinary `Pkcs11Operation::new` keeps the existing routing.
+Certificate fields cannot choose executable paths or arbitrary hardware slots.
+
+For the explicit local interoperability test, set `PQMAIL_COMPANION_DIR` to that
+restored directory and configure `PKCS11_SERIAL`, `PQMAIL_PYTHON`,
+`PQMAIL_ADAPTERS`, `OPENSSL_BIN`, `PKCS11_PROVIDER` and `PKCS11_MODULE` as for the
+existing hardware test. Prepare `plain.txt` and an independently generated
+signed-and-encrypted `java-encrypted.pgp` in the result directory, then run:
+
+```sh
+piv-level3-companion-test test RESTORE_DIRECTORY/public.pgp RESULT_DIRECTORY
+```
+
+Three hidden Terminal PIN prompts authorize one signature and two decryption
+checks. The command writes public signatures and synthetic encrypted messages
+for independent Java verification; it sends no email and changes no card keys,
+policies or objects. The generated Java software fixture has passed fresh
+public-object restore, two-way signature verification and authenticated
+hybrid encryption/decryption. The software operation audit confirms exactly
+one `83` unwrap plus one `9c` signature or `9d` agreement per authorization.
+On November 21, 2026, YubiKey 5.8 test device **40814807** passed Level 3 polyfill signing and authenticated decryption in PQ Mail and Sequoia, including signature verification and encrypted-message exchange in both directions. Fresh on-key restore matched the staged companion and recovery backup byte for byte. The companion is **34,382 bytes**, occupying **34,630 bytes** across 18 card objects. Before/after snapshots confirmed that all four existing keys and their PIN/touch policies were unchanged during the successful resume/test run; other slots and ordinary PIV certificates were unchanged. Slots 82/9c (Ed25519) and 9d (X25519) retain PIN Always/Touch Always; wrapping slot 83 (P-384) retains PIN Always/Touch Never. Restore persisted only public material and encrypted companion data and did not grant contact trust.
+
 ## Level 3 hardware profile
 
 | OpenPGP operation | Component | PIV slot |
